@@ -1,0 +1,4 @@
+source,path,status,collapse_col_used,opposite_col_used,prev_collapse_n,canonical_collapse_n,collapse_intersection,collapse_prev_minus_canonical,collapse_canonical_minus_prev,prev_opposite_n,canonical_opposite_n,opposite_intersection,opposite_prev_minus_canonical,opposite_canonical_minus_prev
+D13,C:\Users\olegk\Desktop\MRI Project\13_final_lcc_side_audit\metrics\independent_lcc_side_audit_all_cases.csv,loaded,lcc_collapse_independent,raw_opposite_half_to_gt_independent,43,43,43,0,0,48,54,39,9,15
+D14,C:\Users\olegk\Desktop\MRI Project\14_lcc_collapse_visual_pattern_review\metrics\all_case_independent_lcc_collapse_pattern_audit.csv,loaded,lcc_collapse,lcc_opposite_half,43,43,43,0,0,47,54,46,1,8
+D15,C:\Users\olegk\Desktop\MRI Project\15_final_lcc_collapse_profile\metrics\all_case_lcc_collapse_profile_table.csv,loaded,lcc_collapse,lcc_opposite_half,43,43,43,0,0,47,54,46,1,8

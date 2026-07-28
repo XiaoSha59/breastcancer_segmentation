@@ -1,0 +1,32 @@
+14 LCC-COLLAPSE VISUAL PATTERN REVIEW — TAKEAWAYS
+==============================================================================
+Cases audited: 526
+
+Flag intersections:
+  LCC-collapse cases: 43 (8.2%)
+  Opposite-half flags: 47 (8.9%)
+  Collapse ∩ opposite-half: 25
+  Collapse outside opposite-half: 18
+  Opposite-half outside collapse: 22
+  Collapse set == opposite set: False
+  Odds ratio collapse vs opposite-half: 29.1
+  Fisher exact p-value: 1.072e-18
+  Chi-square p-value: 9.880e-31
+
+Cohort breakdown:
+  DUKE: n=291, collapse=18 (6.2%), opposite-half=24 (8.2%), centroid>100mm=26 (8.9%)
+  ISPY1: n=171, collapse=20 (11.7%), opposite-half=18 (10.5%), centroid>100mm=13 (7.6%)
+  NACT: n=64, collapse=5 (7.8%), opposite-half=5 (7.8%), centroid>100mm=1 (1.6%)
+
+Suggested manuscript wording:
+  LCC-collapse and opposite-image-half/spatially displaced component selection were
+  strongly associated, but not identical. Opposite-half displacement accounted for
+  part of LCC-collapse cases, while remaining collapse cases reflected additional
+  component-selection or fragmentation failure modes. These results support
+  reporting LCC as a sensitivity analysis rather than a universally safe clinical
+  postprocessing rule.
+
+Important caution:
+  The opposite-half flag is a heuristic based on image-half centroids, not a confirmed
+  anatomical laterality label. Use wording such as 'opposite image half' or 'large
+  spatial displacement', not 'wrong breast', unless manually confirmed.

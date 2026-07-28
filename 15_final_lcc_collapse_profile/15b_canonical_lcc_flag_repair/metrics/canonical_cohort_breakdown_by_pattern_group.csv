@@ -1,0 +1,13 @@
+cohort,canonical_pattern_group,n
+DUKE,collapse_intersect_opposite,9
+DUKE,collapse_not_opposite,9
+DUKE,neither,258
+DUKE,opposite_not_collapse,15
+ISPY1,collapse_intersect_opposite,17
+ISPY1,collapse_not_opposite,3
+ISPY1,neither,144
+ISPY1,opposite_not_collapse,7
+NACT,collapse_intersect_opposite,4
+NACT,collapse_not_opposite,1
+NACT,neither,57
+NACT,opposite_not_collapse,2

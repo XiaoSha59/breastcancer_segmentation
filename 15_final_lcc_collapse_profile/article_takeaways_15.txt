@@ -1,0 +1,38 @@
+15 FINAL LCC-COLLAPSE PROFILE — QUICK TAKEAWAYS
+========================================================================
+Cases analyzed: 526
+
+Set counts:
+  LCC-collapse: 43 / 526 (8.2%)
+  Opposite-image-half flags: 48 / 526 (9.1%)
+  Collapse ∩ opposite: 21 cases
+  Collapse outside opposite: 22 cases
+  Opposite outside collapse: 27 cases
+  Neither: 456 cases
+  Union(collapse, opposite): 70 cases
+  Review-packet IDs parsed: 4 cases
+  Union missing from review packet: 70
+  Review packet extra not in union: 4
+
+Association statistics:
+  Odds ratio: 16.1
+  Fisher exact p-value: 4.015e-13
+  Chi-square p-value: 5.168e-20
+
+Interpretation:
+  Opposite-image-half / large spatial displacement is strongly associated
+  with LCC-collapse, but it is not identical to LCC-collapse. It accounts
+  for 21/43 collapse cases (48.8%).
+  The remaining collapse cases should be described as a separate failure
+  pattern, likely involving component-selection or fragmentation without
+  the opposite-half displacement pattern.
+
+Manuscript-safe wording:
+  'LCC postprocessing improved cohort-average Dice but produced collapse-type
+  failures in a subset of external cases. Opposite-image-half or large spatial
+  displacement was strongly associated with these collapse failures, but did
+  not fully explain them, indicating heterogeneous postprocessing failure modes.'
+
+Important caution:
+  Do not write that side mismatch caused all collapse cases. Use 'associated
+  with' and 'spatially displaced/opposite-image-half component selection'.

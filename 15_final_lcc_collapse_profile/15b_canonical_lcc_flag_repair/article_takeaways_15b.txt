@@ -1,0 +1,65 @@
+15b CANONICAL LCC-COLLAPSE / OPPOSITE-HALF AUDIT
+========================================================================
+Cases audited: 526
+
+Canonical flag definitions:
+  LCC-collapse: raw Dice > 0.2 and LCC Dice < 0.05
+  Opposite-image-half: GT and LCC centroids on opposite image halves with x-distance >= 30.0 mm
+
+Canonical counts:
+  lcc_collapse: 43
+  opposite_half: 54
+  centroid_gt_100mm: 40
+  collapse_intersect_opposite: 30
+  collapse_not_opposite: 13
+  opposite_not_collapse: 24
+  union_collapse_or_opposite: 67
+  collapse_set_equals_opposite_set: False
+
+Odds ratio collapse vs opposite-half: 44.13
+Fisher exact p: 3.948e-24
+Chi-square p: 4.925e-41
+
+Interpretation:
+  Opposite-image-half / large-displacement component selection is associated with LCC-collapse,
+  but it is not identical to LCC-collapse and does not explain all collapse cases.
+  Use cautious wording: 'associated with' or 'observed in a subset', not 'caused by'.
+
+Review-packet note:
+  Corrected review packet generated from exact canonical union, n=67.
+  Use canonical_review_packet_manifest.csv and the contact sheet for visual review.
+
+Previous audit comparison:
+  D13: status=loaded, collapse_col=lcc_collapse_independent, opposite_col=raw_opposite_half_to_gt_independent
+    prev_collapse_n: 43
+    canonical_collapse_n: 43
+    collapse_intersection: 43
+    collapse_prev_minus_canonical: 0
+    collapse_canonical_minus_prev: 0
+    prev_opposite_n: 48
+    canonical_opposite_n: 54
+    opposite_intersection: 39
+    opposite_prev_minus_canonical: 9
+    opposite_canonical_minus_prev: 15
+  D14: status=loaded, collapse_col=lcc_collapse, opposite_col=lcc_opposite_half
+    prev_collapse_n: 43
+    canonical_collapse_n: 43
+    collapse_intersection: 43
+    collapse_prev_minus_canonical: 0
+    collapse_canonical_minus_prev: 0
+    prev_opposite_n: 47
+    canonical_opposite_n: 54
+    opposite_intersection: 46
+    opposite_prev_minus_canonical: 1
+    opposite_canonical_minus_prev: 8
+  D15: status=loaded, collapse_col=lcc_collapse, opposite_col=lcc_opposite_half
+    prev_collapse_n: 43
+    canonical_collapse_n: 43
+    collapse_intersection: 43
+    collapse_prev_minus_canonical: 0
+    collapse_canonical_minus_prev: 0
+    prev_opposite_n: 47
+    canonical_opposite_n: 54
+    opposite_intersection: 46
+    opposite_prev_minus_canonical: 1
+    opposite_canonical_minus_prev: 8

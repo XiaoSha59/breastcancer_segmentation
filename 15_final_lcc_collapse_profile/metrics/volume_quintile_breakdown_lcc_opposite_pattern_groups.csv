@@ -1,0 +1,5 @@
+lcc_opposite_pattern,Q1 smallest,Q2,Q3,Q4,Q5 largest
+collapse_and_opposite,7,8,1,4,1
+collapse_not_opposite,8,4,5,4,1
+neither,77,91,95,92,101
+opposite_not_collapse,14,2,4,5,2

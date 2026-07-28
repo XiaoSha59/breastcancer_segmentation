@@ -1,0 +1,14 @@
+metric,value
+n_cases,526
+lcc_collapse,43
+lcc_opposite_half,47
+lcc_centroid_gt100mm,40
+collapse_intersect_opposite,25
+collapse_outside_opposite,18
+opposite_outside_collapse,22
+neither_collapse_nor_opposite,461
+collapse_set_equals_opposite_set,False
+odds_ratio_collapse_vs_opposite,29.103535353535353
+fisher_exact_p,1.0721689933536291e-18
+chi2,132.82388774889813
+chi2_p,9.879862040463362e-31

@@ -1,0 +1,5 @@
+lcc_opposite_pattern,mixed_volume_and_spatial_error,near_volume_bound,spatial_or_boundary_mismatch_beyond_volume,volume_ratio_limits_dice
+collapse_and_opposite,7,0,4,10
+collapse_not_opposite,8,0,11,3
+neither,78,301,6,71
+opposite_not_collapse,4,4,3,16

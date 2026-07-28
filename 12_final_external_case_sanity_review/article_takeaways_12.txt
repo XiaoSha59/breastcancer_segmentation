@@ -1,0 +1,44 @@
+12 FINAL EXTERNAL CASE SANITY REVIEW — QUICK TAKEAWAYS
+============================================================================
+Cases reviewed quantitatively: 526
+
+Geometry and pairing checks:
+  Any geometry mismatch: 0/526
+  Table raw Dice matched recomputation: 526/526
+  Table LCC Dice matched recomputation: 526/526
+
+Corrected severe-failure selection:
+  Spatial/boundary signature cases: 24/526
+  Large LCC centroid distance > 100 mm: 40/526
+  Raw opposite-side flags: 41/526
+  LCC opposite-side flags: 43/526
+
+LCC trade-off:
+  LCC-collapse cases (raw Dice > 0.2, LCC Dice < 0.05): 43/526
+  LCC-collapse rate: 8.175%
+
+LCC-collapse by cohort:
+  DUKE: 18/291 (6.19%)
+  ISPY1: 20/171 (11.70%)
+  NACT: 5/64 (7.81%)
+
+Opposite-side LCC flags by cohort:
+  DUKE: 24/291 (8.25%)
+  ISPY1: 14/171 (8.19%)
+  NACT: 5/64 (7.81%)
+
+Cleaned intercorrelations:
+  v2_raw_pred_vol_cm3 vs v2_raw_n_components: rho=0.727, families=volume vs component_structure
+  v2_raw_pred_vol_cm3 vs v1_raw_n_components: rho=0.701, families=volume vs component_structure
+  n_phases vs kin_fg_auc_enh_norm: rho=0.685, families=cohort_protocol vs contrast_kinetic
+  n_phases vs kin_fg_max_enh: rho=0.651, families=cohort_protocol vs contrast_kinetic
+  late_dev_s vs n_phases: rho=-0.641, families=timing vs cohort_protocol
+  v2_lcc_pred_vol_cm3 vs v2_raw_n_components: rho=0.634, families=volume vs component_structure
+  v2_lcc_pred_vol_cm3 vs v1_raw_n_components: rho=0.609, families=volume vs component_structure
+  late_dev_s vs kin_fg_auc_enh_norm: rho=-0.561, families=timing vs contrast_kinetic
+
+Manuscript-safe framing:
+  Use this as a targeted sanity review, not as proof that every severe failure was manually audited.
+  If geometry mismatches are zero and recomputed Dice matches the tables, external failures are unlikely to be caused by a global spacing/orientation error.
+  Opposite-side flags and large centroid distances should be described as suspect spatial-displacement patterns requiring qualitative review, not automatically as patient/file mismatch.
+  LCC should be framed as average-improving but case-risky postprocessing, because it can collapse partially correct raw predictions when the largest component is not tumor-overlapping.
