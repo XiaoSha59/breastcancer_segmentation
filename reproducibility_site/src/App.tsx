@@ -5,13 +5,26 @@ import {
   cohortCounts,
   metrics,
   pipelineSteps,
-  runLog,
   type CaseExample,
 } from "./data";
+import {
+  API_BASE,
+  cancelAudit,
+  checkBackend,
+  startAudit,
+  subscribeToRun,
+  type BackendEvent,
+} from "./api";
+import "./backend.css";
+
+type LogEntry = {
+  text: string;
+  kind: "info" | "pass" | "warn" | "error";
+};
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function Icon({ name }: { name: "run" | "image" | "code" | "check" | "zoom" | "reset" }) {
+function Icon({ name }: { name: "check" | "zoom" | "run" | "stop" }) {
   const common = {
     width: 18,
     height: 18,
@@ -23,29 +36,6 @@ function Icon({ name }: { name: "run" | "image" | "code" | "check" | "zoom" | "r
     strokeLinejoin: "round" as const,
   };
 
-  if (name === "run") {
-    return (
-      <svg {...common}>
-        <path d="M7 4v16l13-8L7 4Z" />
-      </svg>
-    );
-  }
-  if (name === "image") {
-    return (
-      <svg {...common}>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <circle cx="8.5" cy="9" r="1.5" />
-        <path d="m4.5 17 5-5 3.5 3 2.5-2.5 4 4" />
-      </svg>
-    );
-  }
-  if (name === "code") {
-    return (
-      <svg {...common}>
-        <path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />
-      </svg>
-    );
-  }
   if (name === "zoom") {
     return (
       <svg {...common}>
@@ -54,14 +44,23 @@ function Icon({ name }: { name: "run" | "image" | "code" | "check" | "zoom" | "r
       </svg>
     );
   }
-  if (name === "reset") {
+
+  if (name === "run") {
     return (
       <svg {...common}>
-        <path d="M20 6v5h-5" />
-        <path d="M18.6 15a8 8 0 1 1 .4-7.9L20 11" />
+        <path d="M7 4v16l13-8L7 4Z" />
       </svg>
     );
   }
+
+  if (name === "stop") {
+    return (
+      <svg {...common}>
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...common}>
       <path d="m5 12 4 4L19 6" />
@@ -85,11 +84,7 @@ function MetricCard({
       <div className="metric-card__head">
         <span>{label}</span>
         <div className="micro-bars" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
+          <i /><i /><i /><i /><i />
         </div>
       </div>
       <strong>{value}</strong>
@@ -102,28 +97,38 @@ function Pipeline({
   currentStep,
   done,
   running,
+  failed,
   elapsed,
 }: {
   currentStep: number;
   done: boolean;
   running: boolean;
+  failed: boolean;
   elapsed: number;
 }) {
-  const progress =
-    done ? 100 : Math.max(0, Math.min(100, (currentStep / (pipelineSteps.length - 1)) * 100));
+  const progress = done
+    ? 100
+    : Math.max(0, Math.min(100, (currentStep / (pipelineSteps.length - 1)) * 100));
 
   return (
     <section className="panel pipeline-panel">
       <div className="section-title-row">
         <div>
-          <div className="eyebrow">EXECUTION TRACE</div>
+          <div className="eyebrow">REAL REPRODUCIBILITY AUDIT</div>
           <h2>Run Pipeline</h2>
-          <p>From leakage-controlled cohort construction to the canonical failure audit.</p>
+          <p>
+            The backend validates the committed research artifacts stage by stage.
+            GPU training and inference are not rerun in this lightweight audit.
+          </p>
         </div>
         <div className="run-meta">
-          <span className={`status-pill ${done ? "verified" : running ? "running" : "ready"}`}>
+          <span
+            className={`status-pill ${
+              failed ? "failed" : done ? "verified" : running ? "running" : "ready"
+            }`}
+          >
             <i />
-            {done ? "Verified" : running ? "Running" : "Ready"}
+            {failed ? "Failed" : done ? "Verified" : running ? "Running" : "Ready"}
           </span>
           <span className="timer">{formatTime(elapsed)}</span>
         </div>
@@ -139,7 +144,9 @@ function Pipeline({
           const active = !done && running && index === currentStep;
           return (
             <div
-              className={`pipeline-step ${complete ? "complete" : ""} ${active ? "active" : ""}`}
+              className={`pipeline-step ${complete ? "complete" : ""} ${
+                active ? "active" : ""
+              }`}
               key={step.title}
             >
               <div className="step-marker">
@@ -157,46 +164,51 @@ function Pipeline({
 }
 
 function LiveLog({
-  visibleLines,
-  typingText,
+  logs,
+  typing,
   done,
+  failed,
 }: {
-  visibleLines: number;
-  typingText: string;
+  logs: LogEntry[];
+  typing: LogEntry | null;
   done: boolean;
+  failed: boolean;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const node = logRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [visibleLines, typingText]);
+  }, [logs, typing]);
 
   return (
     <section className="panel log-panel">
       <div className="section-title-row compact">
         <div>
-          <div className="eyebrow">LIVE OUTPUT</div>
+          <div className="eyebrow">STREAMED FROM PYTHON</div>
           <h2>Execution Log</h2>
         </div>
-        <span className={`streaming ${done ? "verified" : ""}`}>
+        <span className={`streaming ${done ? "verified" : failed ? "failed" : ""}`}>
           <i />
-          {done ? "Complete" : "Streaming"}
+          {failed ? "Stopped" : done ? "Complete" : "Live"}
         </span>
       </div>
       <div className="terminal" ref={logRef}>
-        {runLog.slice(0, visibleLines).map((line, idx) => (
-          <div className={`terminal-line ${line.kind ?? "info"}`} key={`${line.text}-${idx}`}>
-            {line.text}
+        {logs.map((line, idx) => (
+          <div className={`terminal-line ${line.kind}`} key={`${idx}-${line.text}`}>
+            {line.text || "\u00a0"}
           </div>
         ))}
-        {!done && typingText && (
-          <div className={`terminal-line ${runLog[visibleLines]?.kind ?? "info"}`}>
-            {typingText}
-            <span className="cursor" />
+        {typing && (
+          <div className={`terminal-line ${typing.kind}`}>
+            {typing.text}<span className="cursor" />
           </div>
         )}
-        {done && <div className="terminal-prompt">audit@reproducibility:~$ <span className="cursor" /></div>}
+        {done && (
+          <div className="terminal-prompt">
+            audit@reproducibility:~$ <span className="cursor" />
+          </div>
+        )}
       </div>
     </section>
   );
@@ -210,6 +222,7 @@ function CaseCard({
   onOpen: (item: CaseExample) => void;
 }) {
   const delta = item.lccDice - item.rawDice;
+
   return (
     <article className={`case-card ${item.tone}`}>
       <div className="case-card__top">
@@ -217,7 +230,11 @@ function CaseCard({
           <span className="case-tag">{item.tag}</span>
           <h3>{item.title}</h3>
         </div>
-        <button className="icon-button" onClick={() => onOpen(item)} aria-label={`Zoom ${item.id}`}>
+        <button
+          className="icon-button"
+          onClick={() => onOpen(item)}
+          aria-label={`Zoom ${item.id}`}
+        >
           <Icon name="zoom" />
         </button>
       </div>
@@ -238,6 +255,7 @@ function CaseCard({
           </em>
         </strong>
       </div>
+
       <p>{item.explanation}</p>
       <small>Source panel: {item.sourcePath}</small>
     </article>
@@ -253,9 +271,7 @@ function ImageModal({
 }) {
   const [zoom, setZoom] = useState(1);
 
-  useEffect(() => {
-    setZoom(1);
-  }, [item]);
+  useEffect(() => setZoom(1), [item]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -269,7 +285,7 @@ function ImageModal({
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <div>
             <span className="case-tag">{item.tag}</span>
@@ -279,9 +295,9 @@ function ImageModal({
             </p>
           </div>
           <div className="modal-actions">
-            <button onClick={() => setZoom((z) => Math.max(0.7, z - 0.15))}>−</button>
+            <button onClick={() => setZoom((value) => Math.max(0.7, value - 0.15))}>−</button>
             <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.15))}>+</button>
+            <button onClick={() => setZoom((value) => Math.min(2.6, value + 0.15))}>+</button>
             <button className="close-button" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -305,7 +321,8 @@ function ImageModal({
 }
 
 function CohortSummary() {
-  const max = Math.max(...cohortCounts.map((d) => d.value));
+  const max = Math.max(...cohortCounts.map((item) => item.value));
+
   return (
     <section className="panel cohort-panel">
       <div className="section-title-row compact">
@@ -366,81 +383,209 @@ function CodeMap() {
 }
 
 function formatTime(seconds: number) {
-  const mm = Math.floor(seconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const ss = (seconds % 60).toString().padStart(2, "0");
-  return `${mm}:${ss}`;
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const rest = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
 }
 
 export default function App() {
-  const [runKey, setRunKey] = useState(0);
+  const [backendOnline, setBackendOnline] = useState(false);
+  const [backendChecked, setBackendChecked] = useState(false);
+  const [runId, setRunId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [visibleLines, setVisibleLines] = useState(0);
-  const [typingText, setTypingText] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [selectedCase, setSelectedCase] = useState<CaseExample | null>(null);
 
-  const runDemo = () => {
-    setRunKey((value) => value + 1);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [typing, setTyping] = useState<LogEntry | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [backendFinished, setBackendFinished] = useState(false);
+
+  const logQueue = useRef<LogEntry[]>([]);
+  const logTyperBusy = useRef(false);
+  const generation = useRef(0);
+  const unsubscribeRef = useRef<null | (() => void)>(null);
+
+  const refreshHealth = async () => {
+    try {
+      const health = await checkBackend();
+      setBackendOnline(Boolean(health.ok));
+    } catch {
+      setBackendOnline(false);
+    } finally {
+      setBackendChecked(true);
+    }
   };
 
   useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
+    void refreshHealth();
+    const timer = window.setInterval(() => void refreshHealth(), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
-    const execute = async () => {
-      setRunning(true);
-      setDone(false);
-      setCurrentStep(0);
-      setVisibleLines(0);
-      setTypingText("");
-      setElapsed(0);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      setElapsed((value) => value + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
 
-      timer = window.setInterval(() => {
-        setElapsed((value) => value + 1);
-      }, 1000);
+  useEffect(() => {
+    if (backendFinished && pendingCount === 0 && !typing) {
+      setRunning(false);
+      setDone(!failed);
+    }
+  }, [backendFinished, pendingCount, typing, failed]);
 
-      await sleep(450);
-      for (let lineIndex = 0; lineIndex < runLog.length && !cancelled; lineIndex += 1) {
-        const line = runLog[lineIndex];
-        setCurrentStep(Math.min(line.step, pipelineSteps.length - 1));
-        setTypingText("");
+  const drainLogs = async (localGeneration: number) => {
+    if (logTyperBusy.current) return;
+    logTyperBusy.current = true;
 
-        for (let i = 1; i <= line.text.length && !cancelled; i += 1) {
-          setTypingText(line.text.slice(0, i));
-          await sleep(i < 8 ? 12 : 7);
-        }
+    while (logQueue.current.length > 0 && generation.current === localGeneration) {
+      const next = logQueue.current.shift()!;
+      setPendingCount((count) => Math.max(0, count - 1));
 
-        if (cancelled) break;
-        setVisibleLines(lineIndex + 1);
-        setTypingText("");
-        await sleep(line.pause ?? 90);
+      // Empty lines are displayed immediately.
+      if (!next.text) {
+        setLogs((current) => [...current, next]);
+        continue;
       }
 
-      if (!cancelled) {
-        setCurrentStep(pipelineSteps.length - 1);
-        setRunning(false);
-        setDone(true);
-        if (timer) window.clearInterval(timer);
+      // The content is real backend stdout; only the reveal animation is cosmetic.
+      const maxDelay = next.text.length > 120 ? 1 : next.text.length > 70 ? 2 : 4;
+      for (let i = 1; i <= next.text.length; i += 1) {
+        if (generation.current !== localGeneration) break;
+        setTyping({ ...next, text: next.text.slice(0, i) });
+        await sleep(maxDelay);
       }
-    };
 
-    execute();
+      if (generation.current !== localGeneration) break;
+      setLogs((current) => [...current, next]);
+      setTyping(null);
+    }
 
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [runKey]);
+    logTyperBusy.current = false;
+  };
+
+  const enqueueLog = (entry: LogEntry) => {
+    logQueue.current.push(entry);
+    setPendingCount((count) => count + 1);
+    void drainLogs(generation.current);
+  };
+
+  const resetRunUi = () => {
+    generation.current += 1;
+    logQueue.current = [];
+    logTyperBusy.current = false;
+    setLogs([]);
+    setTyping(null);
+    setPendingCount(0);
+    setElapsed(0);
+    setCurrentStep(0);
+    setDone(false);
+    setFailed(false);
+    setBackendFinished(false);
+  };
+
+  const handleBackendEvent = (event: BackendEvent) => {
+    if (event.type === "stage") {
+      setCurrentStep(event.step);
+      return;
+    }
+
+    if (event.type === "log") {
+      enqueueLog({
+        text: event.text,
+        kind: event.kind ?? "info",
+      });
+      return;
+    }
+
+    if (event.type === "run_completed") {
+      setBackendFinished(true);
+      return;
+    }
+
+    if (event.type === "run_failed") {
+      setFailed(true);
+      setBackendFinished(true);
+      if (event.message) enqueueLog({ text: `[ERROR] ${event.message}`, kind: "error" });
+      return;
+    }
+
+    if (event.type === "run_cancelled") {
+      setFailed(true);
+      setBackendFinished(true);
+    }
+  };
+
+  const runAudit = async () => {
+    if (!backendOnline || running) return;
+
+    resetRunUi();
+    setRunning(true);
+
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+
+    try {
+      const run = await startAudit();
+      setRunId(run.id);
+
+      unsubscribeRef.current = subscribeToRun(
+        run.id,
+        handleBackendEvent,
+        () => {
+          if (!backendFinished) {
+            setFailed(true);
+            setBackendFinished(true);
+            enqueueLog({
+              text: "[ERROR] Lost connection to the local reproducibility backend.",
+              kind: "error",
+            });
+          }
+        },
+      );
+    } catch (error) {
+      setFailed(true);
+      setRunning(false);
+      enqueueLog({
+        text: `[ERROR] ${error instanceof Error ? error.message : String(error)}`,
+        kind: "error",
+      });
+    }
+  };
+
+  const stopAudit = async () => {
+    if (!runId) return;
+    try {
+      await cancelAudit(runId);
+    } catch (error) {
+      enqueueLog({
+        text: `[WARN] Could not cancel cleanly: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        kind: "warn",
+      });
+    }
+  };
+
+  useEffect(() => {
+    return () => unsubscribeRef.current?.();
+  }, []);
 
   const runStatus = useMemo(() => {
+    if (!backendChecked) return "Checking backend";
+    if (!backendOnline) return "Backend offline";
+    if (failed) return "Audit stopped";
     if (done) return "All checks passed";
     if (running) return pipelineSteps[currentStep]?.title ?? "Running";
     return "Ready";
-  }, [done, running, currentStep]);
+  }, [backendChecked, backendOnline, failed, done, running, currentStep]);
 
   return (
     <>
@@ -448,9 +593,7 @@ export default function App() {
         <header className="topbar">
           <div className="brand">
             <div className="brand-mark" aria-hidden="true">
-              <span />
-              <span />
-              <span />
+              <span /><span /><span />
             </div>
             <div>
               <h1>Breast DCE-MRI Reliability</h1>
@@ -462,14 +605,37 @@ export default function App() {
           </div>
 
           <div className="header-actions">
+            <div className={`backend-badge ${backendOnline ? "online" : "offline"}`}>
+              <i />
+              {backendOnline ? "Python backend online" : "Python backend offline"}
+              <small>{API_BASE.replace(/^https?:\/\//, "")}</small>
+            </div>
+
             <div className="run-state">
               <small>Current state</small>
               <strong>{runStatus}</strong>
             </div>
-            <button className="primary-button" onClick={runDemo}>
-              <Icon name="reset" />
-              Replay run
-            </button>
+
+            {running ? (
+              <button className="secondary-button danger" onClick={stopAudit}>
+                <Icon name="stop" />
+                Stop audit
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                onClick={runAudit}
+                disabled={!backendOnline}
+                title={
+                  backendOnline
+                    ? "Run the real lightweight reproducibility audit"
+                    : "Start the Python backend first"
+                }
+              >
+                <Icon name="run" />
+                Run real audit
+              </button>
+            )}
           </div>
         </header>
 
@@ -483,6 +649,7 @@ export default function App() {
           currentStep={currentStep}
           done={done}
           running={running}
+          failed={failed}
           elapsed={elapsed}
         />
 
@@ -494,7 +661,8 @@ export default function App() {
                   <div className="eyebrow">PATIENT-LEVEL EXAMPLES</div>
                   <h2>Representative MRI Cases</h2>
                   <p>
-                    Published orthogonal panels used to illustrate when LCC helps and when it fails.
+                    Orthogonal panels illustrating a beneficial LCC case and a canonical
+                    postprocessing collapse.
                   </p>
                 </div>
                 <div className="legend">
@@ -515,13 +683,15 @@ export default function App() {
           </div>
 
           <div className="right-stack">
-            <LiveLog visibleLines={visibleLines} typingText={typingText} done={done} />
+            <LiveLog logs={logs} typing={typing} done={done} failed={failed} />
             <CodeMap />
           </div>
         </section>
 
         <footer>
-          <span>Cross-cohort segmentation reliability · External validation · Failure attribution</span>
+          <span>
+            Cross-cohort segmentation reliability · External validation · Failure attribution
+          </span>
           <span>Public research demo</span>
         </footer>
       </main>

@@ -115,3 +115,5 @@ venv/
 segmentations_2/
 images_2/
 11_catastrophic_case_review/review_packet/nifti_cases/
+
+node_modules/
