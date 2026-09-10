@@ -1,0 +1,2 @@
+test,chi2,df,p_value,min_expected_cell
+"Pearson chi-square, cohort x collapse status",4.369469546121927,2,0.11250756973578784,5.231939163498099
