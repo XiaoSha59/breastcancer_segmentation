@@ -1,68 +1,80 @@
 # =============================================================================
-# .gitignore for breast DCE-MRI segmentation research project
-# Keep: Python scripts, JSON configs, CSV results, figures, requirements
-# Exclude: MRI images, model weights, large archives, environments
+# .gitignore: 3D Breast DCE-MRI Tumor Segmentation & HER2 Classification
 # =============================================================================
 
-# ── MRI IMAGE DATA ────────────────────────────────────────────────────────────
+# ── 1. PYTHON & VIRTUAL ENVIRONMENT ──────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ── 2. DATA DIRECTORIES & RAW MEDICAL IMAGES ─────────────────────────────────
+data/
+data_raw/
+nnunet_raw/
+nnunet_preprocessed/
 *.nii
 *.nii.gz
 *.dcm
 *.mha
 *.nrrd
-*.nhdr
-*.img
-*.hdr
-
-# ── MODEL WEIGHTS & CHECKPOINTS ───────────────────────────────────────────────
-*.pth
-*.pt
-*.pkl
-*.npz
-*.h5
-*.hdf5
-*.onnx
-*.safetensors
-
-# ── LARGE ARCHIVES ────────────────────────────────────────────────────────────
 *.tar
 *.tar.gz
-*.tar.bz2
 *.zip
-*.gz
 *.7z
-*.rar
-*.tar.part_*
-*.sha256
 
-# ── DATA FOLDERS ─────────────────────────────────────────────────────────────
-images/
-images_2/
-segmentations/
-segmentations_2/
-data_main/
-extracted/
-priority_00_01/
-03_home_radiomics_nnunet_raw/
-04_raw_all_timepoint_dce/
-C:/nnw/
+# ── 3. MODEL CHECKPOINTS, WEIGHTS & ARTIFACTS ────────────────────────────────
+outputs/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.safetensors
+*.pkl
+*.pkl.gz
 
-# ── PYTHON ENVIRONMENT ────────────────────────────────────────────────────────
-venv/
-.venv/
-env/
-__pycache__/
-*.pyc
-*.pyo
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
+# ── 4. REPORTS, PLANS, REFERENCES & INTERNAL NOTES ───────────────────────────
+references/
+reports/
+*.report/
+*plan*.md
+*Plan*.md
+README_PROJECT_PLAN.md
+*.docx
+*.pptx
+*.pdf
 
-# ── JUPYTER ───────────────────────────────────────────────────────────────────
+# ── 5. LOGS & EXPERIMENT TRACKERS ────────────────────────────────────────────
+logs/
+*.log
+wandb/
+.tensorboard/
+
+# ── 6. JUPYTER NOTEBOOKS & CACHE ─────────────────────────────────────────────
 .ipynb_checkpoints/
-*.ipynb
+*-checkpoint.ipynb
 
-# ── IDE & OS ──────────────────────────────────────────────────────────────────
+# ── 7. IDE & SYSTEM FILES ───────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
@@ -71,49 +83,10 @@ pip-delete-this-directory.txt
 Thumbs.db
 desktop.ini
 
-# ── LOGS ─────────────────────────────────────────────────────────────────────
-*.log
-*.warnings.log
-
-# =============================================================================
-# EXPLICITLY KEEP (override rules above where needed)
-# =============================================================================
-
-# keep all Python scripts
-!**/*.py
-
-# keep JSON configs and results
-!**/*.json
-!plans.json
-!dataset.json
-!dataset_fingerprint.json
-
-# keep CSV results and manifests
-<!-- !**/*.csv
-!*.csv -->
-
-# keep figures
-<!-- !**/*.png
-!**/*.pdf
-!**/*.svg -->
-
-# keep metadata TSV
-<!-- !**/*.tsv -->
-
-# keep requirements
-!requirements.txt
-!*.txt
-
-# keep this file
+# ── 8. EXPLICITLY KEEP SOURCE CODE ───────────────────────────────────────────
+!src/**
+!scripts/**
+!configs/**
 !.gitignore
 !README.md
-
-02_full_models_results/
-03_home_radiomics_nnunet_raw
-priority_00_01
-venv/
-segmentations_2/
-images_2/
-11_catastrophic_case_review/review_packet/nifti_cases/
-
-node_modules/
+!requirements.txt
