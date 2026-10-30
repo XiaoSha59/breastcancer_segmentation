@@ -1,2 +1,0 @@
-all_cases,lcc_collapse,opposite_half,centroid_gt_100mm,collapse_intersect_opposite,collapse_not_opposite,opposite_not_collapse,neither,collapse_intersect_centroid100,opposite_intersect_centroid100,all_three_collapse_opposite_centroid100,union_collapse_or_opposite,collapse_set_equals_opposite_set,odds_ratio_collapse_vs_opposite,fisher_exact_p,chi2_p
-526,43,54,40,30,13,24,459,19,37,18,67,False,44.13461538461539,3.947682212151622e-24,4.924850104203706e-41

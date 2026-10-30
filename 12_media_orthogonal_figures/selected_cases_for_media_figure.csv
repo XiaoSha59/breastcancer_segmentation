@@ -1,3 +1,0 @@
-role,case_id,raw_dice_computed,lcc_dice_computed,selection_rule,background_channel
-representative,ISPY1_1128,0.3814842659220277,0.8169273229070837,closest to 75th percentile of finite non-zero LCC Dice,early
-lcc_collapse,DUKE_883,0.5224655502205566,0.0,highest raw Dice among raw Dice > 0.20 and LCC Dice < 0.05,early

@@ -1,3 +1,0 @@
--r ../reproducibility/requirements.txt
-fastapi>=0.116,<1.0
-uvicorn[standard]>=0.35,<1.0

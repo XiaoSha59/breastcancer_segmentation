@@ -1,9 +1,0 @@
-lcc_collapse_independent,lcc_opposite_half_to_gt_independent,large_lcc_centroid_distance_gt_100mm_independent,n
-False,False,False,458
-False,False,True,3
-False,True,False,4
-False,True,True,18
-True,False,False,17
-True,False,True,1
-True,True,False,7
-True,True,True,18
