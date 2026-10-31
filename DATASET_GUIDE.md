@@ -21,15 +21,45 @@
 
 ### 2.1. Bộ I-SPY2 (Gói Full 54 GB từ TCIA)
 * **Trang thông tin:** [TCIA BreastDCEDL-ISPY2](https://www.cancerimagingarchive.net/analysis-result/breastdcedl_ispy2/) (DOI: `10.7937/42WQ-TH78`)
-* **Link mở gói tải Aspera Faspex:**
-  👉 **[TCIA Aspera Faspex Package 1158](https://faspex.cancerimagingarchive.net/aspera/faspex/public/package?context=eyJyZXNvdXJjZSI6InBhY2thZ2VzIiwidHlwZSI6ImV4dGVybmFsX2Rvd25sb2FkX3BhY2thZ2UiLCJpZCI6IjExNTgiLCJwYXNzY29kZSI6IjVjZTYxMmQ3MmE2MTE1MDE0ZDRiZjdkNWRlYjI0OThiOWMzZDg1M2MiLCJwYWNrYWdlX2lkIjoiMTE1OCIsImVtYWlsIjoiaGVscEBjYW5jZXJpbWFnaW5nYXJjaGl2ZS5uZXQifQ==)**
-* **Cách tải:** 
-  1. Mở link trên bằng trình duyệt Chrome/Edge trên máy tính cá nhân.
-  2. Bấm **Download Package** (hệ thống sẽ nhắc cài đặt tiện ích **IBM Aspera Connect** nếu chưa có).
-  3. Tiện ích sẽ kéo toàn bộ 54 GB về thư mục `Downloads` của máy tính.
+* **Package Context URL:**
+  ```text
+  https://faspex.cancerimagingarchive.net/aspera/faspex/public/package?context=eyJyZXNvdXJjZSI6InBhY2thZ2VzIiwidHlwZSI6ImV4dGVybmFsX2Rvd25sb2FkX3BhY2thZ2UiLCJpZCI6IjExNTgiLCJwYXNzY29kZSI6IjVjZTYxMmQ3MmE2MTE1MDE0ZDRiZjdkNWRlYjI0OThiOWMzZDg1M2MiLCJwYWNrYWdlX2lkIjoiMTE1OCIsImVtYWlsIjoiaGVscEBjYW5jZXJpbWFnaW5nYXJjaGl2ZS5uZXQifQ==
+  ```
+
+#### ⚡ Phương án 1: Tải bằng Aspera CLI (`ascli`) - KHUYÊN DÙNG (ỔN ĐỊNH 100%)
+Do giao diện web và app Aspera Connect thường gặp lỗi kết nối (chặn cổng UDP hoặc lỗi bắt tay trình duyệt `Unable to download`), giải pháp chuẩn kỹ thuật của TCIA là sử dụng công cụ dòng lệnh **Aspera CLI (`ascli`)**:
+
+1. **Tải bộ Aspera CLI Portable (không cần cài đặt, không cần Ruby):**
+   * [aspera-cli-4.28.0-windows-x86_64-portable.zip](https://github.com/IBM/aspera-cli/releases/download/v4.28.0/aspera-cli-4.28.0-windows-x86_64-portable.zip)
+   * Giải nén vào thư mục `tools/ascli/` trong project.
+
+2. **Lệnh tải toàn bộ 54 GB về thư mục `data/raw` (PowerShell):**
+   ```powershell
+   & ".\tools\ascli\ascli.cmd" faspex5 packages receive `
+     --url="https://faspex.cancerimagingarchive.net/aspera/faspex/public/package?context=eyJyZXNvdXJjZSI6InBhY2thZ2VzIiwidHlwZSI6ImV4dGVybmFsX2Rvd25sb2FkX3BhY2thZ2UiLCJpZCI6IjExNTgiLCJwYXNzY29kZSI6IjVjZTYxMmQ3MmE2MTE1MDE0ZDRiZjdkNWRlYjI0OThiOWMzZDg1M2MiLCJwYWNrYWdlX2lkIjoiMTE1OCIsImVtYWlsIjoiaGVscEBjYW5jZXJpbWFnaW5nYXJjaGl2ZS5uZXQifQ==" `
+     --to-folder="D:\breastcancer_segmentation\data\raw"
+   ```
+
+3. **Lệnh tải thử nghiệm 1 ca bệnh cụ thể (Ví dụ: `ACRIN-6698-102212`):**
+   ```powershell
+   & ".\tools\ascli\ascli.cmd" faspex5 packages receive `
+     --url="<URL_GÓI_TRÊN>" `
+     --to-folder="D:\breastcancer_segmentation\data\raw" `
+     "BreastDCEDL_ISPY2/ACRIN-6698-102212"
+   ```
+
+> [!TIP]
+> **Đặc tính của `ascli`:** Chạy trực tiếp qua giao thức truyền tải FASP tối ưu băng thông. Nếu quá trình tải bị ngắt giữa chừng, chỉ cần chạy lại lệnh, hệ thống sẽ tự động đối chiếu và bỏ qua các file đã tải xong mà không tải lại từ đầu.
+
+#### 🌐 Phương án 2: Tải qua trình duyệt (Aspera Connect Web GUI)
+Nếu sử dụng giao diện web:
+1. Mở link gói trên bằng trình duyệt Chrome/Edge.
+2. Cài đặt tiện ích mở rộng **IBM Aspera Connect** trên Chrome Web Store và app Desktop.
+3. Trong cài đặt app Aspera (icon ⚙️) $\to$ **Transfers** $\to$ bật tùy chọn **"HTTP fallback"** (tránh bị lỗi mạng chặn cổng UDP).
+4. Bấm **Download all** hoặc double click vào thư mục `BreastDCEDL_ISPY2` để tải từng phần.
 
 ### 2.2. Bộ I-SPY1 External Test (1.17 GB từ Zenodo)
-* **DOI:** `10.5281/zenodo.18114231` (phiên bản mới nhất của tác giả Naomi Fridman).
+* **DOI:** `10.5281/zenodo.18114231` (Record mới nhất của Naomi Fridman).
 * **Link tải trực tiếp:** [BreastDCEDL_ISPY1_min_crop.tar.gz (1.17 GB)](https://zenodo.org/api/records/18114231/files/BreastDCEDL_ISPY1_min_crop.tar.gz/content)
 * Có thể tải trực tiếp trên máy local hoặc chạy `wget` thẳng về GCP VM.
 

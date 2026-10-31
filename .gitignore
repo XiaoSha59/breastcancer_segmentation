@@ -41,6 +41,7 @@ nnunet_preprocessed/
 *.tar.gz
 *.zip
 *.7z
+tools/
 
 # ── 3. MODEL CHECKPOINTS, WEIGHTS & ARTIFACTS ────────────────────────────────
 outputs/
