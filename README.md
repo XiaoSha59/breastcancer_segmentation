@@ -13,19 +13,31 @@ An empirical controlled study investigating whether patient-level clinical super
   * **Auxiliary Loss:** Patch-gated weighted binary cross-entropy ($L_{MTL} = L_{seg} + \lambda \cdot m_{cls} \cdot L_{cls}$), where classification loss is restricted to tumor-containing patches.
   * **Evaluation:** Paired bootstrap 95% CI and Wilcoxon signed-rank tests; raw predictions reported as primary metric.
 * **Datasets:**
-  * **Development (Internal):** BreastDCEDL I-SPY2 ($n = 982$, split 784 train / 99 val / 99 test).
+  * **Development (Internal):** BreastDCEDL I-SPY2 ($n = 982$, 5-fold cross-validation from Krikun et al.; Fold 0: 785 train / 197 val).
   * **External Test:** I-SPY1 ($n = 171$, leakage-controlled zero-shot transfer).
 
 ---
 
-## ⚙️ Quick Start
+## 🏆 Phase 1 Baselines: Official Benchmark Results (Fold 0, 197 Val Cases)
 
-```bash
-# 1. Activate virtual environment
-# Windows: .\.venv\Scripts\Activate.ps1
-# Linux:   source .venv/bin/activate
+All 3 baseline architectures were trained on **I-SPY2 Fold 0** (785 train / 197 val) for 200 epochs on a single **NVIDIA L4 GPU**:
 
-# 2. Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+| Baseline Architecture | Mean Dice | Median Dice | Recall / Prec | Median HD95 | Completed At | Checkpoint |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. Vanilla 3D U-Net** *(No Deep Supervision)* | `0.7129 ± 0.187` | `0.7668` | `0.804 / 0.694` | `9.43 mm` | **02:55 SA, 05/11/2026** | `240 MB` |
+| **2. Standard 3D nnU-Net** *(With Deep Supervision)*| `0.7432 ± 0.171` | `0.7940` | `0.780 / 0.758` | `7.28 mm` | **14:55 CH, 04/11/2026** | `240 MB` |
+| **3. ResEnc-UNet L** *(Residual Encoder - SOTA)* | **`0.7793 ± 0.164`** | **`0.8207`** | **`0.798 / 0.814`** | **`4.36 mm`** | **03:01 SA, 04/11/2026** | `1.08 GB` |
+| *Elena Krikun et al. (EJR AI 2026, Table 2)* | `0.752 / 0.786` | `0.795 / 0.828` | `0.780 / 0.814` | `6.63 / 3.74 mm` | — | — |
+
+> 📁 Checkpoints, evaluation logs, and metric JSONs are stored locally in [`checkpoints/`](file:///d:/breastcancer_segmentation/checkpoints/) (see [`checkpoints/README.md`](file:///d:/breastcancer_segmentation/checkpoints/README.md) for full breakdown).
+
+---
+
+## 📚 Documentation & Engineering Guides
+
+* [**3D U-Net Best Practices & Lessons Learned**](file:///d:/breastcancer_segmentation/3D_UNET_BEST_PRACTICES.md): Đúc kết toàn bộ kinh nghiệm thực chiến, bài học chống sập RAM/OOM, bảo toàn Cross-Validation split, và quy chuẩn so sánh mô hình công bằng.
+* [**Checkpoints & Benchmark Results**](file:///d:/breastcancer_segmentation/checkpoints/README.md): Bảng đối chiếu thực nghiệm trực diện 3 baseline (Vanilla 3D U-Net, Standard 3D nnU-Net, ResEnc-UNet L) so với Elena Krikun et al. (EJR AI 2026).
+* [**Dataset Architecture Guide**](file:///d:/breastcancer_segmentation/DATASET_GUIDE.md): Cấu trúc 5 kênh động học $[I_0, I_e, I_l, \Delta I_e, \Delta I_l]$, phân tích dữ liệu I-SPY2 / I-SPY1, định dạng NIfTI và ánh xạ timepoint.
+* [**GCP Cloud VM Operations Guide**](file:///d:/breastcancer_segmentation/GCP_GUIDE.md): Vận hành máy ảo GPU NVIDIA L4, quản trị Swap RAM, hạn chế worker I/O và hệ thống tự động tắt máy 2 tầng.
+* [**Project Master Plan**](file:///d:/breastcancer_segmentation/README_PROJECT_PLAN.md): Đề cương nghiên cứu chi tiết, roadmap 2 giai đoạn (Segmentation First $\to$ Multi-Task Learning).
+

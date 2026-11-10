@@ -97,3 +97,8 @@ desktop.ini
 !.gitignore
 !README.md
 !requirements.txt
+
+# Always ignore bytecode and cache even inside scripts/
+scripts/**/__pycache__/
+**/__pycache__/
+*.py[cod]
