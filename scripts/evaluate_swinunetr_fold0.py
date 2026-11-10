@@ -80,7 +80,6 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SwinUNETR(
-        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,

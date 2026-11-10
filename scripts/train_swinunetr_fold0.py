@@ -48,7 +48,7 @@ def parse_args():
 
 class FastNpyBatchSampler:
     """
-    High-performance patch sampler directly reading memory-mapped .npy files.
+    High-performance patch sampler directly reading memory-mapped .b2nd (Blosc2) or .npy files.
     Enforces nnU-Net's rule: 33% of patches are guaranteed to contain tumor tissue.
     """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
@@ -56,23 +56,44 @@ class FastNpyBatchSampler:
         self.case_ids = case_ids
         self.patch_size = np.array(patch_size)
         self.oversample_fg = oversample_foreground_percent
-        self.mmap_handles = {}
+        self.handles = {}
+        self.is_b2nd = False
 
-        # Pre-verify file existence
+        # Try blosc2
+        try:
+            import blosc2
+            self.has_blosc2 = True
+        except ImportError:
+            self.has_blosc2 = False
+
+        # Pre-verify file existence (.b2nd or .npy)
         valid_ids = []
         for cid in case_ids:
+            b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
             npy_path = os.path.join(prep_dir, f"{cid}.npy")
-            if os.path.exists(npy_path):
+            if os.path.exists(b2nd_path):
+                self.is_b2nd = True
                 valid_ids.append(cid)
+            elif os.path.exists(npy_path):
+                valid_ids.append(cid)
+
         self.case_ids = valid_ids
-        print(f"Sampler initialized with {len(self.case_ids)} valid cases.")
+        format_str = "Blosc2 (.b2nd)" if self.is_b2nd else "NumPy (.npy)"
+        print(f"Sampler initialized with {len(self.case_ids)} valid cases using {format_str}.")
 
     def get_case_data(self, cid):
-        if cid not in self.mmap_handles:
-            npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
-            # Memory-mapped read: zero RAM copy overhead
-            self.mmap_handles[cid] = np.load(npy_path, mmap_mode="r")
-        return self.mmap_handles[cid]
+        if cid not in self.handles:
+            if self.is_b2nd:
+                import blosc2
+                img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
+                seg_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
+                img_h = blosc2.open(img_path)
+                seg_h = blosc2.open(seg_path)
+                self.handles[cid] = (img_h, seg_h)
+            else:
+                npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
+                self.handles[cid] = np.load(npy_path, mmap_mode="r")
+        return self.handles[cid]
 
     def sample_batch(self, batch_size):
         batch_images = []
@@ -80,40 +101,70 @@ class FastNpyBatchSampler:
 
         for b in range(batch_size):
             cid = random.choice(self.case_ids)
-            data = self.get_case_data(cid)  # shape: (6, D, H, W)
-            shape = np.array(data.shape[1:])  # (D, H, W)
+            data_or_handles = self.get_case_data(cid)
 
-            # Pad if image is smaller than patch size
-            needs_pad = shape < self.patch_size
-            if np.any(needs_pad):
-                pad_width = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
-                data_arr = np.pad(data, pad_width, mode="constant", constant_values=0)
-                shape = np.array(data_arr.shape[1:])
+            if self.is_b2nd:
+                img_h, seg_h = data_or_handles
+                shape = np.array(img_h.shape[1:])
+
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    img_data = np.array(img_h[:])
+                    seg_data = np.array(seg_h[:])
+                    pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    img_arr = np.pad(img_data, pad_width_img, mode="constant", constant_values=0)
+                    seg_arr = np.pad(seg_data, pad_width_seg, mode="constant", constant_values=0)
+                    shape = np.array(img_arr.shape[1:])
+                else:
+                    img_arr = img_h
+                    seg_arr = seg_h
+
+                seg_full = seg_arr[0]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg_full > 0)
+
+                if is_fg:
+                    fg_coords = np.argwhere(seg_full > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
+                else:
+                    max_start = shape - self.patch_size
+                    start = np.array([random.randint(0, max(0, m)) for m in max_start])
+
+                s_0, s_1, s_2 = start
+                p_0, p_1, p_2 = self.patch_size
+                patch_img = img_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+                patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+
+                img = np.array(patch_img, dtype=np.float32)
+                lbl = (np.array(patch_seg, dtype=np.float32) > 0).astype(np.float32)
             else:
-                data_arr = data
+                data = data_or_handles
+                shape = np.array(data.shape[1:])
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    pad_width = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    data_arr = np.pad(data, pad_width, mode="constant", constant_values=0)
+                    shape = np.array(data_arr.shape[1:])
+                else:
+                    data_arr = data
 
-            seg = data_arr[5]  # ground truth tumor mask
-            is_fg = (random.random() < self.oversample_fg) and np.any(seg > 0)
+                seg = data_arr[5]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg > 0)
+                if is_fg:
+                    fg_coords = np.argwhere(seg > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
+                else:
+                    max_start = shape - self.patch_size
+                    start = np.array([random.randint(0, max(0, m)) for m in max_start])
 
-            if is_fg:
-                # Center patch on a random foreground voxel
-                fg_coords = np.argwhere(seg > 0)
-                selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
-                start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
-            else:
-                # Random valid crop
-                max_start = shape - self.patch_size
-                start = np.array([random.randint(0, max(0, m)) for m in max_start])
+                s_d, s_h, s_w = start
+                p_d, p_h, p_w = self.patch_size
+                patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
+                img = patch[:5].astype(np.float32)
+                lbl = (patch[5:6] > 0).astype(np.float32)
 
-            s_d, s_h, s_w = start
-            p_d, p_h, p_w = self.patch_size
-            patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
-
-            # Split into image (5 channels) and label (1 channel)
-            img = patch[:5].astype(np.float32)
-            lbl = (patch[5:6] > 0).astype(np.float32)
-
-            # Random 3D spatial augmentations (Mirroring)
             for axis in [1, 2, 3]:
                 if random.random() < 0.5:
                     img = np.flip(img, axis=axis).copy()
@@ -156,7 +207,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = SwinUNETR(
-        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,
