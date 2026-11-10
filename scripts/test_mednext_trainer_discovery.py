@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""
+test_mednext_trainer_discovery.py
+=================================
+Validates that nnUNetTrainerMedNeXt_L_k3_200epochs can be discovered and instantiated
+properly by nnU-Net v2's recursive trainer resolver.
+"""
+
+import os
+import sys
+import json
+import torch
+
+try:
+    from nnunetv2.run.run_training import recursive_find_trainer_class_by_name
+    HAS_NNUNET = True
+except ImportError:
+    HAS_NNUNET = False
+    print("nnunetv2 not installed locally. This test is intended for execution on the GCP VM.")
+
+def main():
+    if not HAS_NNUNET:
+        print("Skipping dynamic nnUNet discovery test on local machine without nnunetv2.")
+        return 0
+
+    cls_name = "nnUNetTrainerMedNeXt_L_k3_200epochs"
+    trainer_cls = recursive_find_trainer_class_by_name(cls_name)
+    if trainer_cls is None:
+        print(f"FAILED: Could not find trainer class '{cls_name}'!")
+        sys.exit(1)
+    print(f"SUCCESS: Found trainer class -> {trainer_cls}")
+
+    prep_dir = "/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
+    plans_path = os.path.join(prep_dir, "nnUNetPlans.json")
+    dataset_path = os.path.join(prep_dir, "dataset.json")
+
+    if not os.path.exists(plans_path):
+        print(f"Warning: {plans_path} not found. Testing class definition only.")
+        return 0
+
+    with open(plans_path, "r") as f:
+        real_plans = json.load(f)
+    real_plans["continue_training"] = False
+
+    with open(dataset_path, "r") as f:
+        real_dataset_json = json.load(f)
+
+    try:
+        instance = trainer_cls(
+            plans=real_plans,
+            configuration="3d_fullres",
+            fold=0,
+            dataset_json=real_dataset_json,
+            device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
+        )
+        print(f"SUCCESS: Instantiated {cls_name} with REAL Dataset501 plans!")
+        print(f"num_epochs: {instance.num_epochs}")
+        assert instance.num_epochs == 200, "num_epochs must be 200!"
+        print("ALL MEDNEXT-L K3 ASSERTIONS PASSED PERFECTLY!")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Instantiation failed: {e}")
+        sys.exit(1)
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
