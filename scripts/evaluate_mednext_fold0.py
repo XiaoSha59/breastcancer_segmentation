@@ -62,22 +62,7 @@ def main():
 
     images_dir = os.path.join(args.data_dir, "imagesTr")
     labels_dir = os.path.join(args.data_dir, "labelsTr")
-
-    val_files = []
-    for cid in val_ids:
-        imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
-        lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-        val_files.append({"image": imgs, "label": lbl, "case_id": cid})
-
-    val_transforms = Compose([
-        LoadImaged(keys=["image", "label"], image_only=False),
-        EnsureChannelFirstd(keys=["label"]),
-        NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-        EnsureTyped(keys=["image", "label"]),
-    ])
-
-    val_ds = Dataset(data=val_files, transform=val_transforms)
-    val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+    has_raw = os.path.exists(images_dir) and len(os.listdir(images_dir)) > 0
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = create_mednext_v1(
@@ -85,12 +70,11 @@ def main():
         num_classes=2,
         model_id=args.model_id,
         kernel_size=args.kernel_size,
-        deep_supervision=False,  # In eval mode, only output highest resolution
+        deep_supervision=False,
     ).to(device)
 
     print(f"Loading weights from {checkpoint_best}...")
     checkpoint = torch.load(checkpoint_best, map_location=device)
-    # Filter state dict if deep supervision heads were saved
     model_state = checkpoint["model_state_dict"]
     model.load_state_dict(model_state, strict=False)
     model.eval()
@@ -101,14 +85,40 @@ def main():
     recall_scores = []
     precision_scores = []
 
-    print("Running sliding window inference on 197 validation cases...")
+    print(f"Running sliding window inference on {len(val_ids)} validation cases (Source: {'Raw NIfTI' if has_raw else 'Preprocessed .b2nd/.npy'})...")
     eval_start = time.time()
 
+    prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
+
     with torch.no_grad():
-        for i, batch in enumerate(val_loader):
-            cid = batch["case_id"][0]
-            inputs = batch["image"].to(device)
-            labels = batch["label"].to(device)
+        for i, cid in enumerate(val_ids):
+            if has_raw:
+                imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
+                lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                img_data = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                # Channel-wise non-zero normalization
+                for c in range(5):
+                    mask = img_data[c] != 0
+                    if np.any(mask):
+                        img_data[c][mask] = (img_data[c][mask] - img_data[c][mask].mean()) / (img_data[c][mask].std() + 1e-8)
+                lbl_arr = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
+                inputs = torch.from_numpy(img_data).unsqueeze(0).to(device)
+            else:
+                b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
+                npy_path = os.path.join(prep_dir, f"{cid}.npy")
+                if os.path.exists(b2nd_path):
+                    import blosc2
+                    img_h = blosc2.open(b2nd_path)
+                    seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
+                    inputs = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                    lbl_arr = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                elif os.path.exists(npy_path):
+                    case_data = np.load(npy_path, mmap_mode="r")
+                    inputs = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
+                    lbl_arr = (case_data[5] > 0).astype(np.uint8)
+                else:
+                    print(f"Warning: Case {cid} not found in raw or prep directory, skipping.")
+                    continue
 
             with autocast():
                 outputs = sliding_window_inference(

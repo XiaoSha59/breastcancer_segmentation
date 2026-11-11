@@ -281,12 +281,20 @@ def main():
                 # Evaluate on a random subset of 20 val cases during training for fast EMA tracking
                 sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
                 for cid in sub_val_ids:
+                    b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
                     npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
-                    if not os.path.exists(npy_path):
+                    if os.path.exists(b2nd_path):
+                        import blosc2
+                        img_h = blosc2.open(b2nd_path)
+                        seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
+                        val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    elif os.path.exists(npy_path):
+                        case_data = np.load(npy_path, mmap_mode="r")
+                        val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (case_data[5] > 0).astype(np.uint8)
+                    else:
                         continue
-                    case_data = np.load(npy_path, mmap_mode="r")
-                    val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
-                    val_lbl = (case_data[5] > 0).astype(np.uint8)
 
                     with autocast():
                         val_out = sliding_window_inference(

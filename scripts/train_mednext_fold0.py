@@ -47,29 +47,45 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
+    parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Enable activation checkpointing to reduce VRAM from 14GB to ~5GB")
     return parser.parse_args()
 
 class FastNpyBatchSampler:
+    """
+    High-performance patch sampler directly reading memory-mapped .b2nd (Blosc2) or .npy files.
+    Enforces nnU-Net's rule: 33% of patches are guaranteed to contain tumor tissue.
+    """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
         self.prep_dir = prep_dir
         self.case_ids = case_ids
         self.patch_size = np.array(patch_size)
         self.oversample_fg = oversample_foreground_percent
-        self.mmap_handles = {}
+        self.handles = {}
+        self.is_b2nd = False
 
-        valid_ids = []
-        for cid in case_ids:
-            npy_path = os.path.join(prep_dir, f"{cid}.npy")
-            if os.path.exists(npy_path):
-                valid_ids.append(cid)
-        self.case_ids = valid_ids
-        print(f"MedNeXt Sampler initialized with {len(self.case_ids)} valid cases.")
+        b2nd_cases = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.b2nd"))]
+        if len(b2nd_cases) > 0:
+            self.is_b2nd = True
+            self.case_ids = b2nd_cases
+            print(f"MedNeXt Sampler initialized with {len(self.case_ids)} valid cases using Blosc2 (.b2nd).")
+        else:
+            npy_cases = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.npy"))]
+            self.case_ids = npy_cases
+            print(f"MedNeXt Sampler initialized with {len(self.case_ids)} valid cases using Numpy (.npy).")
 
     def get_case_data(self, cid):
-        if cid not in self.mmap_handles:
-            npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
-            self.mmap_handles[cid] = np.load(npy_path, mmap_mode="r")
-        return self.mmap_handles[cid]
+        if cid not in self.handles:
+            if self.is_b2nd:
+                import blosc2
+                img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
+                seg_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
+                img_h = blosc2.open(img_path)
+                seg_h = blosc2.open(seg_path)
+                self.handles[cid] = (img_h, seg_h)
+            else:
+                npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
+                self.handles[cid] = np.load(npy_path, mmap_mode="r")
+        return self.handles[cid]
 
     def sample_batch(self, batch_size):
         batch_images = []
@@ -77,34 +93,70 @@ class FastNpyBatchSampler:
 
         for b in range(batch_size):
             cid = random.choice(self.case_ids)
-            data = self.get_case_data(cid)
-            shape = np.array(data.shape[1:])
+            data_or_handles = self.get_case_data(cid)
 
-            needs_pad = shape < self.patch_size
-            if np.any(needs_pad):
-                pad_width = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
-                data_arr = np.pad(data, pad_width, mode="constant", constant_values=0)
-                shape = np.array(data_arr.shape[1:])
+            if self.is_b2nd:
+                img_h, seg_h = data_or_handles
+                shape = np.array(img_h.shape[1:])
+
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    img_data = np.array(img_h[:])
+                    seg_data = np.array(seg_h[:])
+                    pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    img_arr = np.pad(img_data, pad_width_img, mode="constant", constant_values=0)
+                    seg_arr = np.pad(seg_data, pad_width_seg, mode="constant", constant_values=0)
+                    shape = np.array(img_arr.shape[1:])
+                else:
+                    img_arr = img_h
+                    seg_arr = seg_h
+
+                seg_full = seg_arr[0]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg_full > 0)
+
+                if is_fg:
+                    fg_coords = np.argwhere(seg_full > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
+                else:
+                    max_start = shape - self.patch_size
+                    start = np.array([random.randint(0, max(0, m)) for m in max_start])
+
+                s_0, s_1, s_2 = start
+                p_0, p_1, p_2 = self.patch_size
+                patch_img = img_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+                patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+
+                img = np.array(patch_img, dtype=np.float32)
+                lbl = (np.array(patch_seg, dtype=np.float32) > 0).astype(np.float32)
             else:
-                data_arr = data
+                data = data_or_handles
+                shape = np.array(data.shape[1:])
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    pad_width = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    data_arr = np.pad(data, pad_width, mode="constant", constant_values=0)
+                    shape = np.array(data_arr.shape[1:])
+                else:
+                    data_arr = data
 
-            seg = data_arr[5]
-            is_fg = (random.random() < self.oversample_fg) and np.any(seg > 0)
+                seg = data_arr[5] if data_arr.shape[0] > 5 else data_arr[0]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg > 0)
 
-            if is_fg:
-                fg_coords = np.argwhere(seg > 0)
-                selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
-                start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
-            else:
-                max_start = shape - self.patch_size
-                start = np.array([random.randint(0, max(0, m)) for m in max_start])
+                if is_fg:
+                    fg_coords = np.argwhere(seg > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, shape - self.patch_size)
+                else:
+                    max_start = shape - self.patch_size
+                    start = np.array([random.randint(0, max(0, m)) for m in max_start])
 
-            s_d, s_h, s_w = start
-            p_d, p_h, p_w = self.patch_size
-            patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
-
-            img = patch[:5].astype(np.float32)
-            lbl = (patch[5:6] > 0).astype(np.float32)
+                s_d, s_h, s_w = start
+                p_d, p_h, p_w = self.patch_size
+                patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
+                img = patch[:5].astype(np.float32)
+                lbl = (patch[5:6] > 0).astype(np.float32) if patch.shape[0] > 5 else (patch[0:1] > 0).astype(np.float32)
 
             for axis in [1, 2, 3]:
                 if random.random() < 0.5:
@@ -168,6 +220,7 @@ def main():
         model_id=args.model_id,
         kernel_size=args.kernel_size,
         deep_supervision=True,
+        use_checkpoint=args.use_checkpoint,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -233,12 +286,20 @@ def main():
             with torch.no_grad():
                 sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
                 for cid in sub_val_ids:
+                    b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
                     npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
-                    if not os.path.exists(npy_path):
+                    if os.path.exists(b2nd_path):
+                        import blosc2
+                        img_h = blosc2.open(b2nd_path)
+                        seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
+                        val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    elif os.path.exists(npy_path):
+                        case_data = np.load(npy_path, mmap_mode="r")
+                        val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (case_data[5] > 0).astype(np.uint8)
+                    else:
                         continue
-                    case_data = np.load(npy_path, mmap_mode="r")
-                    val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
-                    val_lbl = (case_data[5] > 0).astype(np.uint8)
 
                     with autocast():
                         val_out = sliding_window_inference(

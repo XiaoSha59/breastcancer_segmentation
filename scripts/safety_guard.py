@@ -37,8 +37,11 @@ def main():
             dead_count += 1
             print(f"[{datetime.datetime.now()}] [SafetyGuard] Target PID {target_pid} is NOT alive! Check {dead_count}/5", flush=True)
             if dead_count >= 5:
-                print(f"[{datetime.datetime.now()}] [SafetyGuard] Target dead for 5 minutes. Triggering emergency shutdown now!", flush=True)
-                subprocess.run(['sudo', '/sbin/shutdown', '-h', 'now'])
+                print(f"[{datetime.datetime.now()}] [SafetyGuard] Target dead for 5 minutes. Monitoring complete.", flush=True)
+                if os.environ.get("GCP_CLOUD_INSTANCE", "0") == "1":
+                    subprocess.run(['sudo', '/sbin/shutdown', '-h', 'now'])
+                else:
+                    print(f"[{datetime.datetime.now()}] [SafetyGuard] Server mode active: System remains running.", flush=True)
                 break
         else:
             dead_count = 0

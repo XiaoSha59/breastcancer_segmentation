@@ -17,10 +17,13 @@ FOLD_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_200epochs__nn
 cleanup() {
     EXIT_STATUS=$?
     echo "[$(date)] Training script exiting with status $EXIT_STATUS."
-    echo "[$(date)] Waiting 120 seconds before auto-shutdown to allow logs/checkpoints to flush..."
-    sleep 120
-    echo "[$(date)] Shutting down VM now..."
-    sudo /sbin/shutdown -h now
+    if [ "${GCP_CLOUD_INSTANCE:-0}" = "1" ]; then
+        echo "[$(date)] [Cloud Trap] GCP_CLOUD_INSTANCE=1. Shutting down VM in 120s..."
+        sleep 120
+        sudo /sbin/shutdown -h now || true
+    else
+        echo "[$(date)] [Server Mode] System remains running."
+    fi
 }
 trap cleanup EXIT
 

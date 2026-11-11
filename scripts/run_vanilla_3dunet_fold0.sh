@@ -28,11 +28,14 @@ RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_Vanilla3DU
 # LAYER 1: Auto-shutdown on script exit (whether SUCCESS exit 0, or ERROR exit != 0)
 cleanup() {
     EXIT_STATUS=$?
-    echo "[$(date)] [Layer 1 Trap] Script exiting with status $EXIT_STATUS."
-    echo "[$(date)] [Layer 1 Trap] Waiting 120 seconds before auto-shutdown to allow logs/checkpoints to flush..."
-    sleep 120
-    echo "[$(date)] [Layer 1 Trap] Shutting down VM now..."
-    sudo /sbin/shutdown -h now
+    echo "[$(date)] Script exiting with status $EXIT_STATUS."
+    if [ "${GCP_CLOUD_INSTANCE:-0}" = "1" ]; then
+        echo "[$(date)] [Cloud Trap] GCP_CLOUD_INSTANCE=1. Shutting down VM in 120s..."
+        sleep 120
+        sudo /sbin/shutdown -h now || true
+    else
+        echo "[$(date)] [Server Mode] System remains running."
+    fi
 }
 trap cleanup EXIT ERR INT TERM
 

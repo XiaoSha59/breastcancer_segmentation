@@ -151,3 +151,27 @@ $$\text{Vanilla 3D U-Net (0.7129)} \xrightarrow{+\text{Deep Supervision}} \text{
    * Khi nâng cấp lên ResEnc-UNet L, HD95 giảm một bước ngoặt khổng lồ từ `7.28 mm` xuống **`4.36 mm`** (-40.1%), và khoảng cách bề mặt ASSD lần đầu tiên lọt xuống dưới 1 mm (**`0.93 mm`**).
    * Điều này chứng minh Residual Connections cho phép mạng tăng gấp rưỡi dung lượng (lên 31M tham số) mà không bị bão hòa gradient, giúp phân định ranh giới vi mô của khối u ngấm thuốc cực kỳ chuẩn xác.
 
+---
+
+## 9. Mở Rộng Kiến Trúc SOTA Hiện Đại (MedNeXt-L k3, SwinUNETR, U-Mamba)
+
+Để mở rộng nghiên cứu từ baseline cổ điển sang các trường phái kiến trúc tối tân nhất (2023 - 2024), quy chuẩn thiết kế và vận hành được mở rộng như sau:
+
+### 9.1. Tại sao chọn MedNeXt-L k3 thay vì k5 cho Breast DCE-MRI?
+1. **Chống hiện tượng mờ nhẵn bờ vi thể (Oversmoothing):** 
+   * Khối u ác tính ở vú có ranh giới vi mô phức tạp (bờ tua gai spiculated, bờ đa cung vi thể, đốm ngấm thuốc động học NME). Kernel $5 \times 5 \times 5$ có xu hướng làm mờ (smoothing) các ranh giới này, trong khi kernel $3 \times 3 \times 3$ bảo toàn độ tương phản cường độ cục bộ sắc nét.
+2. **Tương thích với Spacing dị hướng (Anisotropic Spacing):** 
+   * Ảnh DCE-MRI có chiều dày lát cắt trục $Z$ thưa hơn mặt phẳng $X, Y$. Ở các tầng sâu (patch $128 \times 128 \times 64$), trục $Z$ chỉ còn 4 – 8 voxels. Kernel $5 \times 5 \times 5$ sẽ gây biến dạng biên (padding artifacts) nghiêm trọng, trong khi $3 \times 3 \times 3$ trượt rất êm và tự nhiên.
+3. **Cơ chế Inverted Bottleneck & Residual Scaling:**
+   * MedNeXt áp dụng mở rộng kênh $1 \times 1 \times 1 \to 3 \times 3 \times 3 \text{ Depthwise Conv} \to \text{GELU} \to 1 \times 1 \times 1 \text{ Pointwise Conv}$, kết hợp Deep Supervision đa tỉ lệ, mang lại năng lực trích xuất đặc trưng vượt trội so với ResEnc-UNet L truyền thống.
+
+### 9.2. Quy Chuẩn Đọc Dữ Liệu Kép (.b2nd Blosc2 & .npy)
+* Thư mục tiền xử lý chuẩn `nnUNetPlans_3d_fullres` của nnU-Net v2 hiện đại lưu mảng ảnh nén Blosc2 (`.b2nd`) gồm 2 file tách biệt: `{cid}.b2nd` (5 channels ảnh) và `{cid}_seg.b2nd` (1 channel mặt nạ u).
+* Mọi bộ nạp `FastNpyBatchSampler` bắt buộc phải tự động nhận diện cả 2 định dạng `.b2nd` (dùng `blosc2.open`) và `.npy` (dùng `np.load(..., mmap_mode='r')`) để đảm bảo tính di động 100% trên mọi máy chủ.
+
+### 9.3. Vận Hành An Toàn Trên Máy Chủ Trường / Cụm HPC (Cluster Mode)
+* **Quy tắc bất khả xâm phạm:** Tuyệt đối KHÔNG giải phóng ổ đĩa, không chạy các lệnh `rm`, `clean`, `purge`, `apt clean` và không làm ảnh hưởng bất kỳ file/dữ liệu hiện có của các thành viên khác trên server. Toàn bộ tài nguyên của project được gói gọn trong thư mục cá nhân.
+* **Quy tắc tuyệt đối:** Không tự động kích hoạt `sudo shutdown` / `sudo poweroff` trên máy chủ dùng chung (toàn bộ code runner đã được gỡ sạch các lệnh này).
+* **Quản lý tiến trình ngầm:** Bắt buộc sử dụng `tmux` (`tmux new -s train_job`) để tránh tiến trình bị ngắt tín hiệu `SIGHUP` khi đóng trình duyệt hoặc ngắt kết nối SSH.
+
+

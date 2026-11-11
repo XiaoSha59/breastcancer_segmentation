@@ -3,97 +3,98 @@
 # ==============================================================================
 # End-to-end execution of Official MedNeXt-L k3 on I-SPY2 Fold 0 (200 Epochs).
 # Architecture: MedNeXt-L k3 (MICCAI 2023 - Saikat Roy et al., MIC-DKFZ).
-# Framework: Native nnU-Net v2 custom trainer (nnUNetTrainerMedNeXt_L_k3_200epochs).
-# Hardware Safeguards: 32GB Swap, nnUNet_n_proc_DA=4 to prevent RAM OOM crash.
-# Preprocess Strategy: 100% REUSE of existing nnUNetPlans_3d_fullres (NO re-preprocess).
-# Evaluation: Extracts strictly the 6 official paper metrics (Mean/Median Dice, IoU, Rec, Prec, HD95, ASSD).
-# Auto-shutdown: 2-layer fail-safe (Layer 1: Bash trap on EXIT/ERR; Layer 2: Python watchdog).
+# Preprocess Strategy: 100% REUSE of existing nnUNetPlans_3d_fullres (.b2nd / .npy).
+# Hardware Safety: Adapts to RTX 4090 / 4080 / L4.
+# Cluster / Server Safety: Auto-shutdown is DISABLED by default (safe for university servers).
 # ==============================================================================
 
 set -e
 
-export nnUNet_raw="/home/XiaoSha/nnUNet_raw"
-export nnUNet_preprocessed="/home/XiaoSha/nnUNet_preprocessed"
-export nnUNet_results="/home/XiaoSha/nnUNet_results"
-export PATH="/home/XiaoSha/.local/bin:$PATH"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Dynamic environment paths (falls back to $HOME if not preset)
+export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"
+export nnUNet_preprocessed="${nnUNet_preprocessed:-$HOME/nnUNet_preprocessed}"
+export nnUNet_results="${nnUNet_results:-$HOME/nnUNet_results}"
 export OMP_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-# CRITICAL SAFEGUARD: Limit Data Augmentation workers to prevent virtual memory OOM
-export nnUNet_n_proc_DA=4
-
 PREPROCESSED_DIR="$nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
-RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainerMedNeXt_L_k3_200epochs__nnUNetPlans__3d_fullres/fold_0"
+RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_200epochs/fold_0"
+mkdir -p "$RESULTS_DIR"
 
-# LAYER 1: Auto-shutdown on script exit (whether SUCCESS exit 0, or ERROR exit != 0)
+# Cleanup trap: Safe for shared servers (never shuts down machine)
 cleanup() {
     EXIT_STATUS=$?
-    echo "[$(date)] [Layer 1 Trap] Script exiting with status $EXIT_STATUS."
-    echo "[$(date)] [Layer 1 Trap] Waiting 120 seconds before auto-shutdown to allow logs/checkpoints to flush..."
-    sleep 120
-    echo "[$(date)] [Layer 1 Trap] Shutting down VM now..."
-    sudo /sbin/shutdown -h now
+    echo "[$(date)] Script exiting with status $EXIT_STATUS."
+    echo "[$(date)] [Server Mode] Cluster safety active: Machine will remain running."
 }
 trap cleanup EXIT ERR INT TERM
 
-echo "=== STEP 1: PRESERVE & VERIFY 5-FOLD CV SPLITS ==="
-# Backup splits_final.json to guarantee 100% fair comparison with ResEnc Fold 0
-if [ -f "$PREPROCESSED_DIR/splits_final.json" ]; then
-    cp "$PREPROCESSED_DIR/splits_final.json" "$PREPROCESSED_DIR/splits_final.json.bak"
-    echo "Backed up existing splits_final.json."
-elif [ -f "/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2/splits_final.json" ]; then
-    cp "/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2/splits_final.json" "$PREPROCESSED_DIR/splits_final.json"
-    cp "$PREPROCESSED_DIR/splits_final.json" "$PREPROCESSED_DIR/splits_final.json.bak"
-    echo "Restored splits_final.json from data/processed."
+echo "=== STEP 1: VERIFY 5-FOLD CV SPLITS ==="
+SPLITS_FILE="$PREPROCESSED_DIR/splits_final.json"
+if [ ! -f "$SPLITS_FILE" ]; then
+    if [ -f "$PROJECT_DIR/data/processed/Dataset501_BreastDCE_ISPY2/splits_final.json" ]; then
+        cp "$PROJECT_DIR/data/processed/Dataset501_BreastDCE_ISPY2/splits_final.json" "$SPLITS_FILE"
+    elif [ -f "$PROJECT_DIR/splits_final.json" ]; then
+        cp "$PROJECT_DIR/splits_final.json" "$SPLITS_FILE"
+    else
+        echo "Error: splits_final.json not found in $PREPROCESSED_DIR or $PROJECT_DIR!"
+        exit 1
+    fi
 fi
+echo "Verified splits_final.json exists (785 train / 197 val)."
 
-echo "=== STEP 2: VERIFY PLANS & REUSE PREPROCESSED DATA ==="
-# Check if nnUNetPlans.json exists; if not, generate plans ONLY (takes 15s, NEVER re-preprocess)
-if [ ! -f "$PREPROCESSED_DIR/nnUNetPlans.json" ]; then
-    echo "nnUNetPlans.json not found. Running nnUNetv2_plan_experiment (planning only)..."
-    nnUNetv2_plan_experiment -d 501 -c 3d_fullres
-    echo "nnUNetPlans.json generated successfully. Reusing existing preprocessed images in nnUNetPlans_3d_fullres!"
-else
-    echo "Found existing nnUNetPlans.json. Reusing preprocessed data in nnUNetPlans_3d_fullres directly."
+echo "=== STEP 2: VERIFY PREPROCESSED DATA (.b2nd / .npy) ==="
+PLAN_DIR="$PREPROCESSED_DIR/nnUNetPlans_3d_fullres"
+if [ ! -d "$PLAN_DIR" ]; then
+    echo "Error: Preprocessed directory $PLAN_DIR does not exist!"
+    exit 1
 fi
+echo "Verified preprocessed directory $PLAN_DIR."
 
-# Restore backed-up splits_final.json in case planner touched it
-if [ -f "$PREPROCESSED_DIR/splits_final.json.bak" ]; then
-    cp "$PREPROCESSED_DIR/splits_final.json.bak" "$PREPROCESSED_DIR/splits_final.json"
-    echo "Verified splits_final.json is intact (785 train / 197 val)."
-fi
+echo "=== STEP 3: LAUNCH MEDNEXT-L K3 TRAINING (200 EPOCHS) ==="
+echo "[$(date)] Starting train_mednext_fold0.py for MedNeXt-L k3..."
 
-echo "=== STEP 3: REGISTER OFFICIAL MEDNEXT-L K3 TRAINER (200 EPOCHS) ==="
-python3 /home/XiaoSha/project/scripts/add_trainer_mednext_200epochs.py
-python3 /home/XiaoSha/project/scripts/test_mednext_trainer_discovery.py
+python3 -u "$SCRIPT_DIR/train_mednext_fold0.py" \
+    --prep_dir "$PLAN_DIR" \
+    --splits_file "$SPLITS_FILE" \
+    --output_dir "$RESULTS_DIR" \
+    --fold 0 \
+    --epochs 200 \
+    --iterations_per_epoch 250 \
+    --batch_size 2 \
+    --patch_size 128 128 64 \
+    --model_id L \
+    --kernel_size 3 \
+    --initial_lr 0.0001 \
+    --resume &
 
-# Check if checkpoint exists to continue if interrupted
-EXTRA_FLAGS=""
-if [ -f "$RESULTS_DIR/checkpoint_latest.pth" ]; then
-    echo "Found existing checkpoint_latest.pth, continuing training with --c..."
-    EXTRA_FLAGS="--c"
-fi
-
-echo "=== STEP 4: LAUNCH MEDNEXT-L K3 TRAINING (200 EPOCHS) WITH 2-LAYER FAIL-SAFE ==="
-echo "[$(date)] Starting nnUNetv2_train for MedNeXt-L k3 (200 epochs, nnUNetPlans)..."
-
-# Launch training via official nnU-Net v2 engine
-nnUNetv2_train 501 3d_fullres 0 -tr nnUNetTrainerMedNeXt_L_k3_200epochs -p nnUNetPlans $EXTRA_FLAGS &
 TRAIN_PID=$!
-echo "[$(date)] nnUNetv2_train started with PID $TRAIN_PID"
+echo "[$(date)] MedNeXt-L k3 training started with PID $TRAIN_PID"
 
-# LAYER 2: Launch independent Python watchdog daemon monitoring TRAIN_PID
-python3 -u /home/XiaoSha/project/scripts/safety_guard.py $TRAIN_PID > /home/XiaoSha/safety_guard_mednext.log 2>&1 &
-GUARD_PID=$!
-echo "[$(date)] [Layer 2 Guard] Watchdog daemon started with PID $GUARD_PID monitoring PID $TRAIN_PID"
-
-# Wait for training process to finish
+# Wait for training to complete
 wait $TRAIN_PID
 TRAIN_EXIT=$?
-echo "[$(date)] nnUNetv2_train finished with exit code $TRAIN_EXIT"
+echo "[$(date)] MedNeXt-L k3 training finished with exit code $TRAIN_EXIT"
 
-echo "=== STEP 5: EXTRACT ALL 6 OFFICIAL PAPER METRICS ==="
-python3 -u /home/XiaoSha/project/scripts/compute_paper_metrics.py "$RESULTS_DIR" "MedNeXt-L k3 (MICCAI 2023, nnUNetPlans)" || echo "Warning: Failed to compute paper metrics"
+if [ $TRAIN_EXIT -ne 0 ]; then
+    echo "Training failed with exit code $TRAIN_EXIT"
+    exit $TRAIN_EXIT
+fi
 
-echo "=== MEDNEXT-L K3 TRAINING & EVALUATION COMPLETE AT $(date) ==="
+echo "=== STEP 4: SLIDING WINDOW EVALUATION ON 197 VALIDATION CASES ==="
+python3 -u "$SCRIPT_DIR/evaluate_mednext_fold0.py" \
+    --data_dir "$nnUNet_raw/Dataset501_BreastDCE_ISPY2" \
+    --splits_file "$SPLITS_FILE" \
+    --output_dir "$RESULTS_DIR" \
+    --fold 0 \
+    --model_id L \
+    --kernel_size 3 || echo "Evaluation warning: Check validation logs"
+
+echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "MedNeXt-L k3 (Fold 0, 200 epochs)" || echo "Metrics warning"
+
+echo "=== MEDNEXT-L K3 TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="

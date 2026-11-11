@@ -96,6 +96,8 @@ desktop.ini
 !configs/**
 !.gitignore
 !README.md
+!3D_UNET_BEST_PRACTICES.md
+!UNIVERSITY_SERVER_GUIDE.md
 !requirements.txt
 
 # Always ignore bytecode and cache even inside scripts/

@@ -245,10 +245,11 @@ def main() -> None:
         log("STAGE 6: FINAL AUTO-SHUTDOWN")
         log("=================================================================")
         log("Waiting 60 seconds before initiating system power-off...")
-        subprocess.run(["sync"])
-        time.sleep(60)
-        log("Executing: sudo /sbin/shutdown -h now")
-        subprocess.run(["sudo", "/sbin/shutdown", "-h", "now"])
+        if os.environ.get("GCP_CLOUD_INSTANCE", "0") == "1":
+            log("Executing: sudo /sbin/shutdown -h now")
+            subprocess.run(["sudo", "/sbin/shutdown", "-h", "now"])
+        else:
+            log("Server mode active: system remains running.")
 
 
 if __name__ == "__main__":

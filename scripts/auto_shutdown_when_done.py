@@ -41,8 +41,11 @@ def main() -> None:
             subprocess.run(["sync"])
             time.sleep(5)
 
-            print(f"[{now_str}] Executing sudo shutdown -h now...", flush=True)
-            subprocess.run(["sudo", "shutdown", "-h", "now"])
+            if os.environ.get("GCP_CLOUD_INSTANCE", "0") == "1":
+                print(f"[{now_str}] Executing sudo shutdown -h now...", flush=True)
+                subprocess.run(["sudo", "shutdown", "-h", "now"])
+            else:
+                print(f"[{now_str}] Server mode active: system remains running.", flush=True)
             break
         else:
             time.sleep(60)

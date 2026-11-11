@@ -98,10 +98,12 @@ class MedNeXt(nn.Module):
         n_channels: int = 32,
         block_counts: list = [2, 2, 2, 2, 2, 2, 2, 2, 2],
         norm_type: str = 'group',
+        use_checkpoint: bool = False,
     ):
         super().__init__()
         self.deep_supervision = deep_supervision
         self.n_classes = n_classes
+        self.use_checkpoint = use_checkpoint
 
         if enc_kernel_size is None:
             enc_kernel_size = kernel_size
@@ -156,6 +158,7 @@ class MedNeXt(nn.Module):
         self.final_head = nn.Conv3d(n_channels, n_classes, kernel_size=1, stride=1, padding=0, bias=True)
 
     def forward(self, x):
+        from torch.utils.checkpoint import checkpoint as grad_checkpoint
         x = self.stem(x)
 
         # Encoder forward pass
@@ -163,12 +166,18 @@ class MedNeXt(nn.Module):
         for i in range(4):
             if i > 0:
                 x = self.down_blocks[i - 1](x)
-            x = self.enc_blocks[i](x)
+            if self.use_checkpoint and self.training:
+                x = grad_checkpoint(self.enc_blocks[i], x, use_reentrant=False)
+            else:
+                x = self.enc_blocks[i](x)
             skips.append(x)
 
         # Bottleneck
         x = self.down_blocks[3](x)
-        x = self.bottleneck(x)
+        if self.use_checkpoint and self.training:
+            x = grad_checkpoint(self.bottleneck, x, use_reentrant=False)
+        else:
+            x = self.bottleneck(x)
 
         # Decoder forward pass
         ds_outputs = []
@@ -176,7 +185,10 @@ class MedNeXt(nn.Module):
             x = self.up_blocks[i](x)
             skip = skips[3 - i]
             x = torch.cat([x, skip], dim=1)
-            x = self.dec_blocks[i](x)
+            if self.use_checkpoint and self.training:
+                x = grad_checkpoint(self.dec_blocks[i], x, use_reentrant=False)
+            else:
+                x = self.dec_blocks[i](x)
 
             if self.deep_supervision and i < 3:
                 ds_out = self.ds_heads[i](x)
@@ -189,7 +201,7 @@ class MedNeXt(nn.Module):
             return [out] + ds_outputs[::-1]
         return out
 
-def create_mednext_v1(num_channels=5, num_classes=2, model_id='L', kernel_size=3, deep_supervision=True):
+def create_mednext_v1(num_channels=5, num_classes=2, model_id='L', kernel_size=3, deep_supervision=True, use_checkpoint=False):
     """
     Model creation utility matching MIC-DKFZ MedNeXt official configurations:
     - 'S' (Small): base_channels=32, block_counts=[2,2,2,2, 2, 2,2,2,2], exp_r=2
