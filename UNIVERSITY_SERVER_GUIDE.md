@@ -52,13 +52,25 @@ Tài liệu này tổng hợp toàn bộ các **nguyên tắc bắt buộc từ 
     export CUDA_VISIBLE_DEVICES=0  # Hoặc 1, 2 tùy theo card nào còn trống
     ```
 
-### 4. 💾 QUẢN LÝ Ổ ĐĨA & TRÁNH TRÀN THƯ MỤC HOME (`Disk Quota`)
+### 4. 💾 QUẢN LÝ Ổ ĐĨA & QUY TẮC BUFFER AN TOÀN TRÁNH TREO MÁY
 * **Lý do:**
-  * Phân vùng `/home/username` trên máy trường thường bị giới hạn quota dung lượng nhỏ (20 GB – 50 GB).
-  * Bộ dữ liệu preprocessed (`nnUNetPlans_3d_fullres`) 501 ca nặng khoảng **64 GB**, nếu để ở thư mục Home sẽ làm đầy quota và khóa tài khoản người dùng.
-* **Quy tắc:**
-  * Kiểm tra dung lượng còn trống: `df -h .`
-  * Nếu phòng lab có phân vùng lưu trữ lớn (`/data`, `/scratch`, `/mnt/storage`), hãy lưu dữ liệu preprocessed ở đó và dùng symbolic link (`ln -s`) trỏ về project.
+  * Phân vùng `/home/username` trên máy trường thường nằm chung trên ổ đĩa hệ thống `/` (chỉ có 80 GB – 100 GB trống).
+  * Bộ dữ liệu preprocessed (`Dataset501`) nặng khoảng **~64 GB**. Nếu tải trực tiếp vào `~`, nó sẽ vét sạch dung lượng trống, làm ổ cứng chạm 100% khiến hệ điều hành đóng băng cổng đăng nhập SSH (`Entering interactive session`).
+* **Quy tắc Buffer Ổ Đĩa (Disk Buffer):**
+  * **Mức Buffer Tối Thiểu:** Luôn phải chừa tối thiểu **`25 GB – 30 GB` dung lượng trống bất khả xâm phạm** cho phân vùng hệ điều hành (`/`) để Linux lưu file log, swap, session và file tạm của các user khác.
+  * **Công thức an toàn:** `Dung lượng còn trống (Avail)` $\ge$ `Dung lượng dữ liệu (64 GB) + 30 GB Buffer` $\rightarrow$ **Cần tối thiểu 95 GB trống**.
+  * Nếu ổ hiện tại có `Avail < 95 GB`: **Tuyệt đối KHÔNG lưu vào thư mục Home (`~`)**. Phải tìm phân vùng lưu trữ lớn (`/home/students`, `/data`, `/scratch`, `/mnt/storage` - nơi thường có hàng TB trống) và dùng symbolic link (`ln -s`) trỏ về project.
+
+### 4.1. ⚡ QUY TẮC BUFFER AN TOÀN CHO GPU VRAM (TRÁNH CRASH DRIVER & OOM)
+* **Lý do:**
+  * Khi GPU bị ép sát trần 100% VRAM (ví dụ 15.9 GB / 16 GB trên RTX 4080, hoặc 23.9 GB / 24 GB trên RTX 4090), các đột biến bộ nhớ bất ngờ trong bước backward pass hoặc sliding window validation sẽ dẫn đến lỗi CUDA OOM hoặc nguy hiểm hơn là làm nghẽn bus PCIe / treo Driver NVIDIA (GPU Lock), kéo theo tê liệt máy chủ lab.
+* **Mức Buffer VRAM Chuẩn:**
+  * **RTX 4080 (16 GB VRAM):** Chỉ cấp phát tối đa **`12 GB – 13 GB`**, luôn chừa **`3 GB – 4 GB Buffer`**.
+  * **RTX 4090 (24 GB VRAM):** Chỉ cấp phát tối đa **`18 GB – 20 GB`**, luôn chừa **`4 GB – 5 GB Buffer`**.
+* **Kỹ thuật bắt buộc trong mã nguồn để đảm bảo Buffer:**
+  1. **Bật AMP Mixed Precision (`torch.cuda.amp.autocast(dtype=torch.float16)`)**: Giảm 50% dung lượng VRAM lưu activations và weights.
+  2. **Bật Gradient Checkpointing (`use_checkpoint=True`)**: Giảm thêm 30-40% VRAM đỉnh mà chỉ tốn thêm ~10% thời gian tính toán.
+  3. **Giới hạn Sliding Window Batch:** Khi validate 197 ca, đặt `sw_batch_size=2` hoặc `4`, `overlap=0.5` để không làm bùng nổ bộ nhớ.
 
 ### 5. 📜 GHI LOG LIÊN TỤC VÀO FILE (`train.log`)
 * **Lý do:**
