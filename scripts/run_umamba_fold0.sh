@@ -3,9 +3,11 @@
 # ==============================================================================
 # End-to-end execution of Official U-Mamba Bot 3D on I-SPY2 Fold 0 (200 Epochs).
 # Architecture: U-Mamba Bot 3D (Bo Wang Lab, MICCAI 2024 - Jun Ma et al.).
-# Preprocess Strategy: 100% REUSE of existing nnUNetPlans_3d_fullres (.b2nd / .npy).
-# Hardware Safety: Adapts to RTX 4090 / 4080 / L4.
-# Cluster / Server Safety: Auto-shutdown is DISABLED by default (safe for university servers).
+# Preprocess Strategy: 100% REUSE of existing 64GB nnUNetPlans_3d_fullres (.b2nd).
+# Memory Safeguards: export nnUNet_n_proc_DA=4 to prevent 42GB virtual memory OOM crash.
+# Server Safety: Auto-shutdown is STRICTLY DISABLED on cluster (safe for university servers).
+# Cloud Safety: Auto-shutdown is enabled ONLY when AUTO_SHUTDOWN=1 or GCP_CLOUD_INSTANCE=1.
+# Evaluation: Extracts strictly the 4 paper metrics (Mean Dice, Median Dice, HD95, ASSD).
 # ==============================================================================
 
 set -e
@@ -13,19 +15,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Dynamic environment paths (falls back to $HOME if not preset)
+# Dynamic environment paths
 export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"
 export nnUNet_preprocessed="${nnUNet_preprocessed:-$HOME/nnUNet_preprocessed}"
 export nnUNet_results="${nnUNet_results:-$HOME/nnUNet_results}"
+export PATH="$HOME/.local/bin:$PATH"
 export OMP_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
+# CRITICAL SAFEGUARD (Section 4 of 3D_UNET_BEST_PRACTICES.md): Limit DA workers to prevent RAM OOM
+export nnUNet_n_proc_DA=4
+
 PREPROCESSED_DIR="$nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
-RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/UMambaBot_3d_200epochs/fold_0"
+RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainerUMambaBot_200epochs__nnUNetPlans__3d_fullres/fold_0"
 mkdir -p "$RESULTS_DIR"
 
-# Cleanup trap: Shuts down ONLY if AUTO_SHUTDOWN=1 or GCP_CLOUD_INSTANCE=1 is explicitly set
+# LAYER 1: Auto-shutdown trap (ONLY active on GCP Cloud when explicitly requested)
 cleanup() {
     EXIT_STATUS=$?
     echo "[$(date)] Script exiting with status $EXIT_STATUS."
@@ -39,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT ERR INT TERM
 
-echo "=== STEP 1: VERIFY 5-FOLD CV SPLITS ==="
+echo "=== STEP 1: PRESERVE & VERIFY 5-FOLD CV SPLITS ==="
 SPLITS_FILE="$PREPROCESSED_DIR/splits_final.json"
 if [ ! -f "$SPLITS_FILE" ]; then
     if [ -f "$PROJECT_DIR/data/processed/Dataset501_BreastDCE_ISPY2/splits_final.json" ]; then
@@ -53,33 +59,38 @@ if [ ! -f "$SPLITS_FILE" ]; then
 fi
 echo "Verified splits_final.json exists (785 train / 197 val)."
 
-echo "=== STEP 2: VERIFY PREPROCESSED DATA (.b2nd / .npy) ==="
+echo "=== STEP 2: REGISTER & VALIDATE U-MAMBA BOT 3D TRAINER IN nnU-Net ==="
+python3 "$SCRIPT_DIR/add_trainer_umamba_200epochs.py"
+python3 "$SCRIPT_DIR/test_umamba_trainer_discovery.py"
+
+echo "=== STEP 3: VERIFY PLANS & REUSE 64GB PREPROCESSED DATA ==="
 PLAN_DIR="$PREPROCESSED_DIR/nnUNetPlans_3d_fullres"
 if [ ! -d "$PLAN_DIR" ]; then
     echo "Error: Preprocessed directory $PLAN_DIR does not exist!"
     exit 1
 fi
-echo "Verified preprocessed directory $PLAN_DIR."
 
-echo "=== STEP 3: LAUNCH U-MAMBA BOT 3D TRAINING (200 EPOCHS) ==="
-echo "[$(date)] Starting train_umamba_fold0.py for U-Mamba Bot 3D..."
+if [ ! -f "$PREPROCESSED_DIR/nnUNetPlans.json" ]; then
+    echo "nnUNetPlans.json not found. Running nnUNetv2_plan_experiment (planning only, NO re-preprocess)..."
+    nnUNetv2_plan_experiment -d 501 -c 3d_fullres
+fi
+echo "Reusing existing 64GB preprocessed data in $PLAN_DIR directly."
 
-python3 -u "$SCRIPT_DIR/train_umamba_fold0.py" \
-    --prep_dir "$PLAN_DIR" \
-    --splits_file "$SPLITS_FILE" \
-    --output_dir "$RESULTS_DIR" \
-    --fold 0 \
-    --epochs 200 \
-    --iterations_per_epoch 250 \
-    --batch_size 2 \
-    --patch_size 128 128 64 \
-    --initial_lr 0.0001 \
-    --resume &
+# Check if checkpoint exists to seamlessly continue if interrupted
+EXTRA_FLAGS=""
+if [ -f "$RESULTS_DIR/checkpoint_latest.pth" ]; then
+    echo "Found existing checkpoint_latest.pth in $RESULTS_DIR, continuing training with --c..."
+    EXTRA_FLAGS="--c"
+fi
 
+echo "=== STEP 4: LAUNCH U-MAMBA BOT 3D TRAINING (200 EPOCHS, 250 ITER/EPOCH) ==="
+echo "[$(date)] Starting nnUNetv2_train for U-Mamba Bot 3D..."
+
+nnUNetv2_train 501 3d_fullres 0 -tr nnUNetTrainerUMambaBot_200epochs -p nnUNetPlans $EXTRA_FLAGS &
 TRAIN_PID=$!
 echo "[$(date)] U-Mamba Bot 3D training started with PID $TRAIN_PID"
 
-# Launch safety watchdog ONLY if cloud auto-shutdown is requested
+# LAYER 2: Launch independent Python watchdog daemon ONLY if cloud auto-shutdown is requested
 if [ "${AUTO_SHUTDOWN:-0}" = "1" ] || [ "${GCP_CLOUD_INSTANCE:-0}" = "1" ]; then
     if [ -f "$SCRIPT_DIR/safety_guard.py" ]; then
         python3 -u "$SCRIPT_DIR/safety_guard.py" $TRAIN_PID > "$RESULTS_DIR/safety_guard.log" 2>&1 &
@@ -98,14 +109,20 @@ if [ $TRAIN_EXIT -ne 0 ]; then
     exit $TRAIN_EXIT
 fi
 
-echo "=== STEP 4: SLIDING WINDOW EVALUATION ON 197 VALIDATION CASES ==="
-python3 -u "$SCRIPT_DIR/evaluate_umamba_fold0.py" \
-    --data_dir "$nnUNet_raw/Dataset501_BreastDCE_ISPY2" \
-    --splits_file "$SPLITS_FILE" \
-    --output_dir "$RESULTS_DIR" \
-    --fold 0 || echo "Evaluation warning: Check validation logs"
+echo "=== STEP 5: VERIFY VALIDATION INFERENCE ON 197 CASES ==="
+# nnUNet performs validation automatically at epoch 199. If summary.json missing, run predict:
+if [ ! -f "$RESULTS_DIR/validation/summary.json" ] && [ ! -f "$RESULTS_DIR/validation_raw/summary.json" ]; then
+    echo "Running nnUNetv2_predict on validation cohort..."
+    mkdir -p "$RESULTS_DIR/validation"
+    # Fallback to evaluate_umamba_fold0.py if nnUNet raw folder is mapped differently
+    python3 -u "$SCRIPT_DIR/evaluate_umamba_fold0.py" \
+        --data_dir "$nnUNet_raw/Dataset501_BreastDCE_ISPY2" \
+        --splits_file "$SPLITS_FILE" \
+        --output_dir "$RESULTS_DIR" \
+        --fold 0 || echo "Validation warning: Check validation logs"
+fi
 
-echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "U-Mamba Bot 3D (Fold 0, 200 epochs)" || echo "Metrics warning"
+echo "=== STEP 6: COMPUTE OFFICIAL PAPER METRICS (Krikun Table 2) ==="
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "U-Mamba Bot 3D (MICCAI 2024, nnU-Net v2)" || echo "Metrics warning"
 
 echo "=== U-MAMBA BOT 3D TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="

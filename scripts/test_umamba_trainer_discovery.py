@@ -56,11 +56,26 @@ def main():
         print(f"SUCCESS: Instantiated {cls_name} with REAL Dataset501 plans!")
         print(f"num_epochs: {instance.num_epochs}")
         assert instance.num_epochs == 200, "num_epochs must be 200!"
+
+        print("Testing instance.initialize()...")
+        instance.initialize()
+        print("SUCCESS: Trainer initialized network architecture!")
+
+        dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        dummy_x = torch.randn(2, 5, 128, 128, 64, device=dev)
+        print(f"Testing network forward pass with input shape {dummy_x.shape} on {dev}...")
+        with torch.no_grad():
+            outputs = instance.network(dummy_x)
+        if isinstance(outputs, list):
+            print(f"SUCCESS: Deep supervision outputs ({len(outputs)} stages): {[o.shape for o in outputs]}")
+        else:
+            print(f"SUCCESS: Network output shape: {outputs.shape}")
+
         print("ALL U-MAMBA BOT 3D ASSERTIONS PASSED PERFECTLY!")
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"Instantiation failed: {e}")
+        print(f"Initialization or forward pass failed: {e}")
         sys.exit(1)
 
     return 0
