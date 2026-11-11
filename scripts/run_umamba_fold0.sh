@@ -25,11 +25,17 @@ PREPROCESSED_DIR="$nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
 RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/UMambaBot_3d_200epochs/fold_0"
 mkdir -p "$RESULTS_DIR"
 
-# Cleanup trap: Safe for shared servers (never shuts down machine)
+# Cleanup trap: Shuts down ONLY if AUTO_SHUTDOWN=1 or GCP_CLOUD_INSTANCE=1 is explicitly set
 cleanup() {
     EXIT_STATUS=$?
     echo "[$(date)] Script exiting with status $EXIT_STATUS."
-    echo "[$(date)] [Server Mode] Cluster safety active: Machine will remain running."
+    if [ "${AUTO_SHUTDOWN:-0}" = "1" ] || [ "${GCP_CLOUD_INSTANCE:-0}" = "1" ]; then
+        echo "[$(date)] [Auto-Shutdown] Cloud mode active. Waiting 120s before powering off VM..."
+        sleep 120
+        sudo /sbin/shutdown -h now || sudo poweroff || true
+    else
+        echo "[$(date)] [Server Mode] Cluster safety active: Machine will remain running."
+    fi
 }
 trap cleanup EXIT ERR INT TERM
 
@@ -72,6 +78,15 @@ python3 -u "$SCRIPT_DIR/train_umamba_fold0.py" \
 
 TRAIN_PID=$!
 echo "[$(date)] U-Mamba Bot 3D training started with PID $TRAIN_PID"
+
+# Launch safety watchdog ONLY if cloud auto-shutdown is requested
+if [ "${AUTO_SHUTDOWN:-0}" = "1" ] || [ "${GCP_CLOUD_INSTANCE:-0}" = "1" ]; then
+    if [ -f "$SCRIPT_DIR/safety_guard.py" ]; then
+        python3 -u "$SCRIPT_DIR/safety_guard.py" $TRAIN_PID > "$RESULTS_DIR/safety_guard.log" 2>&1 &
+        GUARD_PID=$!
+        echo "[$(date)] [Watchdog] Cloud watchdog started with PID $GUARD_PID monitoring PID $TRAIN_PID"
+    fi
+fi
 
 # Wait for training to complete
 wait $TRAIN_PID
