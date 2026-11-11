@@ -220,8 +220,14 @@ class UNetResEncoder(nn.Module):
         self.stages = nn.Sequential(*stages)
         self.output_channels = features_per_stage
         self.strides = [maybe_convert_scalar_to_list(conv_op, i) for i in strides]
+        self.kernel_sizes = kernel_sizes
         self.return_skips = return_skips
         self.conv_op = conv_op
+        self.conv_bias = conv_bias
+        self.norm_op = norm_op
+        self.norm_op_kwargs = norm_op_kwargs
+        self.nonlin = nonlin
+        self.nonlin_kwargs = nonlin_kwargs
 
     def forward(self, x):
         if self.stem is not None:
@@ -359,41 +365,47 @@ class UMambaBot(nn.Module):
 
 def get_umamba_bot_3d_from_plans(
         plans_manager: PlansManager,
-        dataset_json: dict,
         configuration_manager: ConfigurationManager,
         num_input_channels: int,
+        num_output_channels: int,
         deep_supervision: bool = True
     ):
-    num_stages = len(configuration_manager.conv_kernel_sizes)
-    dim = len(configuration_manager.conv_kernel_sizes[0])
+    arch_kwargs = configuration_manager.network_arch_init_kwargs
+    kernel_sizes = arch_kwargs['kernel_sizes']
+    strides = arch_kwargs['strides']
+    n_stages = arch_kwargs.get('n_stages', len(kernel_sizes))
+    features_per_stage = arch_kwargs['features_per_stage']
+
+    dim = len(kernel_sizes[0])
     conv_op = convert_dim_to_conv_op(dim)
-    label_manager = plans_manager.get_label_manager(dataset_json)
 
     kwargs = {
         'UMambaBot': {
-            'conv_bias': True,
+            'conv_bias': arch_kwargs.get('conv_bias', True),
             'norm_op': get_matching_instancenorm(conv_op),
             'norm_op_kwargs': {'eps': 1e-5, 'affine': True},
             'nonlin': nn.LeakyReLU, 'nonlin_kwargs': {'inplace': True},
         }
     }
 
-    conv_or_blocks_per_stage = {
-        'n_conv_per_stage': configuration_manager.n_conv_per_stage_encoder,
-        'n_conv_per_stage_decoder': configuration_manager.n_conv_per_stage_decoder
-    }
+    n_conv_per_stage = arch_kwargs.get('n_conv_per_stage', [2] * n_stages)
+    n_conv_per_stage_decoder = arch_kwargs.get('n_conv_per_stage_decoder', [2] * (n_stages - 1))
+    if isinstance(n_conv_per_stage, int):
+        n_conv_per_stage = [n_conv_per_stage] * n_stages
+    if isinstance(n_conv_per_stage_decoder, int):
+        n_conv_per_stage_decoder = [n_conv_per_stage_decoder] * (n_stages - 1)
 
     model = UMambaBot(
         input_channels=num_input_channels,
-        n_stages=num_stages,
-        features_per_stage=[min(configuration_manager.UNet_base_num_features * 2 ** i,
-                                configuration_manager.unet_max_num_features) for i in range(num_stages)],
+        n_stages=n_stages,
+        features_per_stage=features_per_stage,
         conv_op=conv_op,
-        kernel_sizes=configuration_manager.conv_kernel_sizes,
-        strides=configuration_manager.pool_op_kernel_sizes,
-        num_classes=label_manager.num_segmentation_heads,
+        kernel_sizes=kernel_sizes,
+        strides=strides,
+        num_classes=num_output_channels,
         deep_supervision=deep_supervision,
-        **conv_or_blocks_per_stage,
+        n_conv_per_stage=n_conv_per_stage,
+        n_conv_per_stage_decoder=n_conv_per_stage_decoder,
         **kwargs['UMambaBot']
     )
     model.apply(InitWeights_He(1e-2))
