@@ -28,10 +28,10 @@ All 3 baseline architectures were trained on **I-SPY2 Fold 0** (785 train / 197 
 | **2. Standard 3D nnU-Net** *(With Deep Supervision)*| `0.7432 ± 0.171` | `0.7940` | `0.780 / 0.758` | `7.28 mm` | ✅ Completed (GCP L4) | `240 MB` |
 | **3. ResEnc-UNet L** *(Residual Encoder - Baseline)* | **`0.7793 ± 0.164`** | **`0.8207`** | **`0.798 / 0.814`** | **`4.36 mm`** | ✅ Completed (GCP L4) | `1.08 GB` |
 | *Elena Krikun et al. (EJR AI 2026, Table 2)* | `0.752 / 0.786` | `0.795 / 0.828` | `0.780 / 0.814` | `6.63 / 3.74 mm` | Reference Ground Truth | — |
-| **4. SwinUNETR** *(Hierarchical 3D ViT - MONAI)* | *Evaluating...* | *Evaluating...* | — | — | ⏳ In Progress (~20:30, GCP L4) | `720 MB` |
+| **4. SwinUNETR** *(Hierarchical 3D ViT - MONAI)* | `0.6916 ± 0.218` | `0.7454` | `0.742 / 0.738` | `11.20 mm` | ✅ Completed (GCP L4) | `720 MB` |
 | **5. MedNeXt-L k3** *(Modern 3D CNN - MICCAI 2023)* | — | — | — | — | 🚀 Ready for School GPU | — |
-| **6. U-Mamba Bot 3D** *(State Space Model - 2024)* | — | — | — | — | 🚀 Ready for School GPU | — |
-| **7. PrimusV2** *(Pure 3D Transformer - 2024)* | — | — | — | — | 📋 Planned for School GPU | — |
+| **6. U-Mamba Bot 3D** *(State Space Model - 2024)* | **`0.7481 ± 0.179`** | **`0.8040`** | `0.785 / 0.771` | **`6.32 mm`** | ✅ Completed (GCP L4) | `240 MB` |
+| **7. PrimusV2** *(Pure 3D Transformer - 2024)* | — | — | — | — | 📋 Planned for Evaluation | — |
 
 > 📁 Checkpoints, evaluation logs, and metric JSONs are stored locally in [`checkpoints/`](file:///d:/breastcancer_segmentation/checkpoints/) (see [`checkpoints/README.md`](file:///d:/breastcancer_segmentation/checkpoints/README.md) for full breakdown).
 
