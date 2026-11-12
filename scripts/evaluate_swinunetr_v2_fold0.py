@@ -200,9 +200,27 @@ def main():
         "mean_precision": mean_precision,
         "eval_time_seconds": eval_duration,
         "patient_metrics": patient_metrics,
+        "metric_per_case": [
+            {
+                "reference_file": f"{cid}.nii.gz",
+                "prediction_file": f"{cid}.nii.gz",
+                "metrics": {
+                    "1": {
+                        "Dice": m["dice"],
+                        "IoU": m["iou"],
+                        "Precision": m["precision"],
+                        "Recall": m["recall"],
+                    }
+                }
+            }
+            for cid, m in patient_metrics.items()
+        ]
     }
 
     with open(os.path.join(args.output_dir, "summary.json"), "w") as f:
+        json.dump(summary_data, f, indent=2)
+
+    with open(os.path.join(val_out_dir, "summary.json"), "w") as f:
         json.dump(summary_data, f, indent=2)
 
     # Compute HD95 & ASSD using project's compute_paper_metrics.py if present

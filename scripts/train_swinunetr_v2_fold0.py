@@ -258,6 +258,7 @@ def main():
         log_print(f"Resumed at epoch {start_epoch}. Current best Dice: {best_val_dice:.4f}")
 
     start_time = time.time()
+    mean_val_dice = 0.0
 
     for epoch in range(start_epoch, args.epochs):
         epoch_start = time.time()
@@ -293,56 +294,48 @@ def main():
 
         log_print(f"Epoch {epoch:03d}/{args.epochs:03d} | Train Loss: {epoch_loss:.4f} | LR: {current_lr:.6f} | Time: {epoch_duration:.1f}s")
 
-        # Validation at intervals
-        val_dice = 0.0
-        if (epoch + 1) % args.val_interval == 0 or (epoch + 1) == args.epochs:
+        # Sliding window evaluation on validation cohort
+        if (epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1:
             model.eval()
             val_dices = []
-            log_print(f"Running periodic validation on subset of val cases (Epoch {epoch})...")
-            
             with torch.no_grad():
-                val_sample_ids = random.sample(val_ids, min(20, len(val_ids)))
-                for cid in val_sample_ids:
-                    case_data = train_sampler.get_case_data(cid)
-                    if train_sampler.is_b2nd:
-                        img_h, seg_h = case_data
-                        img_arr = img_h[:]
-                        seg_arr = seg_h[:]
+                # Evaluate on a random subset of 20 val cases during training for fast EMA tracking
+                sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
+                for cid in sub_val_ids:
+                    b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
+                    npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
+                    if os.path.exists(b2nd_path):
+                        import blosc2
+                        img_h = blosc2.open(b2nd_path)
+                        seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
+                        val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    elif os.path.exists(npy_path):
+                        case_data = np.load(npy_path, mmap_mode="r")
+                        val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
+                        val_lbl = (case_data[5] > 0).astype(np.uint8)
                     else:
-                        img_arr = case_data[:5]
-                        seg_arr = case_data[5:6]
-
-                    img_tensor = torch.from_numpy(img_arr.astype(np.float32)).unsqueeze(0).to(device)
-                    seg_tensor = torch.from_numpy(seg_arr.astype(np.int64)).unsqueeze(0).to(device)
-
-                    for c in range(img_tensor.shape[1]):
-                        mean = img_tensor[0, c].mean()
-                        std = img_tensor[0, c].std()
-                        if std > 1e-5:
-                            img_tensor[0, c] = (img_tensor[0, c] - mean) / std
+                        continue
 
                     with autocast():
-                        val_logits = sliding_window_inference(
-                            inputs=img_tensor,
-                            roi_size=args.patch_size,
+                        val_out = sliding_window_inference(
+                            inputs=val_img,
+                            roi_size=tuple(args.patch_size),
                             sw_batch_size=2,
                             predictor=model,
                             overlap=0.5,
-                            mode="gaussian",
                         )
-                        pred = torch.argmax(val_logits, dim=1, keepdim=True)
 
-                    # Compute foreground Dice
-                    intersection = ((pred == 1) & (seg_tensor == 1)).sum().float()
-                    denom = (pred == 1).sum().float() + (seg_tensor == 1).sum().float()
-                    dice = (2.0 * intersection / (denom + 1e-5)).item()
+                    pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
+                    inter = np.logical_and(pred, val_lbl).sum()
+                    union = pred.sum() + val_lbl.sum()
+                    dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
                     val_dices.append(dice)
 
-            val_dice = float(np.mean(val_dices))
-            log_print(f"--- Epoch {epoch:03d} Val Dice: {val_dice:.4f} (Best: {best_val_dice:.4f}) ---")
-
-            if val_dice > best_val_dice:
-                best_val_dice = val_dice
+            mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
+            is_best = mean_val_dice > best_val_dice
+            if is_best:
+                best_val_dice = mean_val_dice
                 log_print(f"🎉 New best validation Dice achieved: {best_val_dice:.4f}! Saving checkpoint_best.pth")
                 torch.save({
                     "epoch": epoch,
@@ -354,12 +347,15 @@ def main():
                     "model_name": "SwinUNETR_v2",
                 }, checkpoint_best)
 
+            log_print(f"Validation Epoch {epoch:03d} | Proxy Val Dice: {mean_val_dice:.4f} (Best: {best_val_dice:.4f}) {'[★ NEW BEST]' if is_best else ''}")
+
         # Save checkpoint_latest.pth every epoch
+        is_val_epoch = ((epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1)
         progress_history.append({
             "epoch": epoch,
             "train_loss": epoch_loss,
             "lr": current_lr,
-            "val_dice": val_dice if (epoch + 1) % args.val_interval == 0 else None,
+            "val_dice": mean_val_dice if is_val_epoch else None,
             "time_seconds": epoch_duration,
         })
 

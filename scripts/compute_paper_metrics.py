@@ -58,9 +58,10 @@ def compute_case_surface(args):
 def main():
     results_dir = sys.argv[1] if len(sys.argv) > 1 else "/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_200epochs__nnUNetPlans__3d_fullres/fold_0"
     model_name = sys.argv[2] if len(sys.argv) > 2 else "Standard 3D nnU-Net (Plain Conv, nnUNetPlans)"
-    
     val_dir = os.path.join(results_dir, "validation")
     gt_dir = "/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/gt_segmentations"
+    if not os.path.exists(gt_dir):
+        gt_dir = "/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2/labelsTr"
     summary_json = os.path.join(val_dir, "summary.json")
     
     if not os.path.exists(summary_json):
