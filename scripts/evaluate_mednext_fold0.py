@@ -137,7 +137,7 @@ def main():
             pred = (prob > 0.5).float()
 
             pred_np = pred.squeeze().cpu().numpy().astype(np.uint8)
-            label_np = labels.squeeze().cpu().numpy().astype(np.uint8)
+            label_np = lbl_arr
 
             intersection = np.logical_and(pred_np, label_np).sum()
             union = np.logical_or(pred_np, label_np).sum()
@@ -166,17 +166,53 @@ def main():
                 "Precision": float(prec),
             }
 
-            ref_path = os.path.join(labels_dir, f"{cid}.nii.gz")
-            ref_img = sitk.ReadImage(ref_path)
+            # NIfTI geometry export with raw or metadata fallback
+            if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
+                ref_path = os.path.join(labels_dir, f"{cid}.nii.gz")
+                ref_img = sitk.ReadImage(ref_path)
+                spacing = ref_img.GetSpacing()
+                origin = ref_img.GetOrigin()
+                direction = ref_img.GetDirection()
+            else:
+                pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
+                if os.path.exists(pkl_path):
+                    import pickle
+                    try:
+                        with open(pkl_path, "rb") as pf:
+                            meta = pickle.load(pf)
+                        raw_sp = meta.get("spacing", [1.0, 1.0, 1.0])
+                        spacing = (float(raw_sp[2]), float(raw_sp[1]), float(raw_sp[0]))
+                    except Exception:
+                        spacing = (1.0, 1.0, 1.0)
+                else:
+                    spacing = (1.0, 1.0, 1.0)
+                origin = (0.0, 0.0, 0.0)
+                direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
             pred_img = sitk.GetImageFromArray(pred_np)
-            pred_img.SetSpacing(ref_img.GetSpacing())
-            pred_img.SetOrigin(ref_img.GetOrigin())
-            pred_img.SetDirection(ref_img.GetDirection())
+            pred_img.SetSpacing(spacing)
+            pred_img.SetOrigin(origin)
+            pred_img.SetDirection(direction)
             out_nii_path = os.path.join(val_out_dir, f"{cid}.nii.gz")
             sitk.WriteImage(pred_img, out_nii_path)
 
-            if (i + 1) % 25 == 0 or (i + 1) == len(val_loader):
-                print(f"[{i+1}/{len(val_loader)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
+            # Also export ground truth NIfTI for HD95 calculation if raw is absent
+            gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
+            os.makedirs(gt_dir_for_eval, exist_ok=True)
+            gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
+            if not os.path.exists(gt_nii_path):
+                gt_img = sitk.GetImageFromArray(label_np)
+                gt_img.SetSpacing(spacing)
+                gt_img.SetOrigin(origin)
+                gt_img.SetDirection(direction)
+                sitk.WriteImage(gt_img, gt_nii_path)
+
+            del inputs, outputs, prob, pred
+            if (i + 1) % 10 == 0:
+                torch.cuda.empty_cache()
+
+            if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
+                print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
 
     eval_duration = time.time() - eval_start
     print(f"Inference complete in {eval_duration:.1f}s.")
@@ -189,6 +225,10 @@ def main():
         "mean_recall": float(np.mean(recall_scores)),
         "mean_precision": float(np.mean(precision_scores)),
         "cases": patient_metrics,
+        "metric_per_case": [
+            {"reference_file": cid, "metrics": {"1": {"Dice": m["Dice"], "IoU": m["IoU"], "Recall": m["Recall"], "Precision": m["Precision"]}}}
+            for cid, m in patient_metrics.items()
+        ],
     }
 
     summary_file = os.path.join(val_out_dir, "summary.json")

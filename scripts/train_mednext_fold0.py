@@ -329,7 +329,9 @@ def main():
                     union = pred.sum() + val_lbl.sum()
                     dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
                     val_dices.append(dice)
+                    del val_img, val_out, pred
 
+            torch.cuda.empty_cache()
             mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
             is_best = mean_val_dice > best_val_dice
             if is_best:

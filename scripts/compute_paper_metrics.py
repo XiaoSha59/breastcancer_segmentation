@@ -59,9 +59,17 @@ def main():
     results_dir = sys.argv[1] if len(sys.argv) > 1 else "/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_200epochs__nnUNetPlans__3d_fullres/fold_0"
     model_name = sys.argv[2] if len(sys.argv) > 2 else "Standard 3D nnU-Net (Plain Conv, nnUNetPlans)"
     val_dir = os.path.join(results_dir, "validation")
-    gt_dir = "/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/gt_segmentations"
-    if not os.path.exists(gt_dir):
-        gt_dir = "/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2/labelsTr"
+    gt_candidates = [
+        os.path.join(val_dir, "gt_masks"),
+        os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/gt_segmentations"),
+        "/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/gt_segmentations",
+        "/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2/labelsTr",
+    ]
+    gt_dir = ""
+    for cand in gt_candidates:
+        if os.path.isdir(cand) and len(os.listdir(cand)) > 0:
+            gt_dir = cand
+            break
     summary_json = os.path.join(val_dir, "summary.json")
     
     if not os.path.exists(summary_json):
