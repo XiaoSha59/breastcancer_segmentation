@@ -194,13 +194,11 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "train.log")
     
-    # Dynamic CPU Thread Allocation: Limit PyTorch to at most 25% of available cores
-    total_cpus = os.cpu_count() or 8
-    safe_threads = max(2, min(8, total_cpus // 4))
-    torch.set_num_threads(safe_threads)
+    # Fixed CPU Thread Allocation for node1 (Intel i9-7900X): strictly 4 threads
+    torch.set_num_threads(4)
     if hasattr(torch, "set_num_interop_threads"):
         try:
-            torch.set_num_interop_threads(max(1, safe_threads // 2))
+            torch.set_num_interop_threads(2)
         except RuntimeError:
             pass
 

@@ -13,21 +13,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Dynamic environment paths (with auto-detection for repo and cluster paths)
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-
-# Dynamic CPU Core Detection: Safely limit to 25% of available cores to avoid starving lab members
-TOTAL_CORES=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo "8")
-SAFE_THREADS=$(( TOTAL_CORES / 4 ))
-[ "$SAFE_THREADS" -lt 2 ] && SAFE_THREADS=2
-[ "$SAFE_THREADS" -gt 8 ] && SAFE_THREADS=8
-echo "[System Telemetry] Detected $TOTAL_CORES CPU cores. Allocating polite quota: $SAFE_THREADS threads (leaving $((TOTAL_CORES - SAFE_THREADS)) cores for other users)."
-
-export OMP_NUM_THREADS="$SAFE_THREADS"
-export MKL_NUM_THREADS="$SAFE_THREADS"
-export OPENBLAS_NUM_THREADS="$SAFE_THREADS"
-export NUMEXPR_NUM_THREADS="$SAFE_THREADS"
-export VECLIB_MAXIMUM_THREADS="$SAFE_THREADS"
+# Hardcoded Fixed Resource Allocation for node1 (Intel i9-7900X 20 threads & RTX 4090)
+export CUDA_VISIBLE_DEVICES="0"
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export NUMEXPR_NUM_THREADS=4
+export VECLIB_MAXIMUM_THREADS=4
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
