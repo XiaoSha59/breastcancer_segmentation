@@ -18,6 +18,8 @@ export PATH="/home/XiaoSha/.local/bin:$PATH"
 export OMP_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export AUTO_SHUTDOWN=1
+export GCP_CLOUD_INSTANCE=1
 
 DATA_DIR="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2"
 SPLITS_FILE="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"
