@@ -90,7 +90,8 @@ def main():
     args = [(pf, gt_dir) for pf in pred_files]
     
     t0 = time.time()
-    with Pool(8) as p:
+    num_workers = max(1, min(4, (os.cpu_count() or 4) // 2))
+    with Pool(num_workers) as p:
         surf_res = p.map(compute_case_surface, args)
     
     dt = time.time() - t0
