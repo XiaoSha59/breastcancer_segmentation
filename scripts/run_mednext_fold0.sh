@@ -15,9 +15,26 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Dynamic environment paths (with auto-detection for repo and cluster paths)
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export NUMEXPR_NUM_THREADS=4
+export VECLIB_MAXIMUM_THREADS=4
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
+# GPU Collision Guard: Never collide with another lab member's active job
+if command -v nvidia-smi &> /dev/null; then
+    TARGET_GPU="${CUDA_VISIBLE_DEVICES:-0}"
+    MEM_USED=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i "$TARGET_GPU" 2>/dev/null || echo "0")
+    if [ "$MEM_USED" -gt 1500 ]; then
+        echo "[CRITICAL SAFETY ERROR] GPU $TARGET_GPU is currently BUSY (${MEM_USED} MiB VRAM used)!"
+        echo "Starting now would crash the other student's training job."
+        echo "Check 'nvidia-smi' and assign an idle card: export CUDA_VISIBLE_DEVICES=<free_gpu>"
+        exit 1
+    fi
+    echo "Verified GPU $TARGET_GPU is idle (${MEM_USED} MiB used). Safe to allocate."
+fi
 
 if [ -d "$PROJECT_DIR/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres" ]; then
     PREPROCESSED_DIR="$PROJECT_DIR/data/preprocessed/Dataset501_BreastDCE_ISPY2"
@@ -36,9 +53,14 @@ else
 fi
 mkdir -p "$RESULTS_DIR"
 
-# Cleanup trap: Safe for shared servers (never shuts down machine)
+# Cleanup trap: Safe for shared servers (kills child training process on interrupt, never shuts down machine)
 cleanup() {
     EXIT_STATUS=$?
+    if [ -n "$TRAIN_PID" ] && kill -0 "$TRAIN_PID" 2>/dev/null; then
+        echo "[$(date)] Interrupted: Safely terminating MedNeXt training process $TRAIN_PID to free GPU VRAM..."
+        kill -TERM "$TRAIN_PID" 2>/dev/null || true
+        wait "$TRAIN_PID" 2>/dev/null || true
+    fi
     echo "[$(date)] Script exiting with status $EXIT_STATUS."
     echo "[$(date)] [Server Mode] Cluster safety active: Machine will remain running."
 }
@@ -103,7 +125,7 @@ fi
 
 echo "=== STEP 4: SLIDING WINDOW EVALUATION ON 197 VALIDATION CASES ==="
 python3 -u "$SCRIPT_DIR/evaluate_mednext_fold0.py" \
-    --data_dir "$nnUNet_raw/Dataset501_BreastDCE_ISPY2" \
+    --prep_dir "$PLAN_DIR" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \

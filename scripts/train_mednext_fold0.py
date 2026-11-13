@@ -75,6 +75,9 @@ class FastNpyBatchSampler:
 
     def get_case_data(self, cid):
         if cid not in self.handles:
+            # Prevent open file descriptor / memory leak on shared servers
+            if len(self.handles) >= 100:
+                self.handles.pop(next(iter(self.handles)))
             if self.is_b2nd:
                 import blosc2
                 img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
@@ -189,7 +192,15 @@ def compute_multiscale_loss(loss_fn, outputs, target):
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
-    log_file = os.path.join(args.output_dir, "training_log.txt")
+    log_file = os.path.join(args.output_dir, "train.log")
+    
+    # Clamping CPU threads to prevent server starvation
+    torch.set_num_threads(4)
+    if hasattr(torch, "set_num_interop_threads"):
+        try:
+            torch.set_num_interop_threads(2)
+        except RuntimeError:
+            pass
 
     def log_print(msg):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -36,6 +36,7 @@ from monai.inferers import sliding_window_inference
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate MedNeXt on I-SPY2 Fold 0")
     parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2")
+    parser.add_argument("--prep_dir", type=str, default="", help="Path to preprocessed nnUNetPlans_3d_fullres folder")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
@@ -88,7 +89,10 @@ def main():
     print(f"Running sliding window inference on {len(val_ids)} validation cases (Source: {'Raw NIfTI' if has_raw else 'Preprocessed .b2nd/.npy'})...")
     eval_start = time.time()
 
-    prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
+    if args.prep_dir and os.path.isdir(args.prep_dir):
+        prep_dir = args.prep_dir
+    else:
+        prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
 
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
