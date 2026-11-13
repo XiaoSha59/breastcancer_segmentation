@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 64])
     parser.add_argument("--model_id", type=str, default="L", choices=["S", "B", "M", "L"])
+    parser.add_argument("--kernel_size", type=int, default=3, choices=[3, 5])
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
