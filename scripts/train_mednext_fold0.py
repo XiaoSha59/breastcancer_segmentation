@@ -42,12 +42,12 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 64])
     parser.add_argument("--model_id", type=str, default="L", choices=["S", "B", "M", "L"])
-    parser.add_argument("--kernel_size", type=int, default=3, choices=[3, 5])
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Enable activation checkpointing to reduce VRAM from 14GB to ~5GB")
+    parser.add_argument("--disable_cudnn", action="store_true", default=True, help="Disable external cuDNN library and use rock-solid native PyTorch CUDA kernels")
     return parser.parse_args()
 
 class FastNpyBatchSampler:
@@ -230,7 +230,10 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    if device.type == "cuda":
+    if args.disable_cudnn:
+        torch.backends.cudnn.enabled = False
+        log_print("cuDNN disabled by safe default flag. Running 100% on rock-solid native PyTorch CUDA kernels.")
+    elif device.type == "cuda":
         try:
             torch.cuda.set_device(device)
             dummy_in = torch.zeros(1, 1, 8, 8, 8, device=device)
