@@ -224,6 +224,7 @@ def create_mednext_v1(num_channels=5, num_classes=2, model_id='L', kernel_size=3
         deep_supervision=deep_supervision,
         n_channels=cfg['n_channels'],
         block_counts=cfg['block_counts'],
+        use_checkpoint=use_checkpoint,
     )
 
 if __name__ == "__main__":
