@@ -85,10 +85,17 @@ python3 -u /home/XiaoSha/project/scripts/safety_guard.py $TRAIN_PID > /home/Xiao
 GUARD_PID=$!
 echo "[$(date)] [Layer 2 Guard] Watchdog daemon started with PID $GUARD_PID monitoring PID $TRAIN_PID"
 
-# Wait for training process to finish
 wait $TRAIN_PID
 TRAIN_EXIT=$?
 echo "[$(date)] SwinUNETR V2 training finished with exit code $TRAIN_EXIT"
+
+# Disarm training watchdog once training completes successfully
+kill $GUARD_PID 2>/dev/null || true
+
+if [ $TRAIN_EXIT -ne 0 ]; then
+    echo "Training failed with exit code $TRAIN_EXIT"
+    exit $TRAIN_EXIT
+fi
 
 echo "=== STEP 4: FULL INDEPENDENT VALIDATION ON 197 CASES ==="
 python3 -u /home/XiaoSha/project/scripts/evaluate_swinunetr_v2_fold0.py \
