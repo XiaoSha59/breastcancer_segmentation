@@ -66,6 +66,7 @@ def main():
         "scripts/train_swinunetr_v2_fold0.py",
         "scripts/evaluate_swinunetr_v2_fold0.py",
         "scripts/run_swinunetr_v2_fold0.sh",
+        "scripts/compute_paper_metrics.py",
     ]
     code, out, err = run_cmd([
         "gcloud", "compute", "scp",

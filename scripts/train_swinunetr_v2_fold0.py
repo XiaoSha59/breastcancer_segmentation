@@ -222,7 +222,6 @@ def main():
     # SwinUNETR V2: use_v2=True and downsample="mergingv2"
     log_print("Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48)...")
     model = SwinUNETR(
-        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,
