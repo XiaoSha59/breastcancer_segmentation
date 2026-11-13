@@ -225,6 +225,23 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Hardware stability on RTX 4090 / Ada Lovelace architecture
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+    if device.type == "cuda":
+        try:
+            torch.cuda.set_device(device)
+            dummy_in = torch.zeros(1, 1, 8, 8, 8, device=device)
+            dummy_w = torch.zeros(1, 1, 3, 3, 3, device=device)
+            torch.nn.functional.conv3d(dummy_in, dummy_w)
+            torch.cuda.empty_cache()
+            log_print("cuDNN engine initialized cleanly!")
+        except Exception as e:
+            log_print(f"cuDNN warmup notice: {e}. Disabling cuDNN for safe native fallback.")
+            torch.backends.cudnn.enabled = False
+
     model = create_mednext_v1(
         num_channels=5,
         num_classes=2,
@@ -239,7 +256,10 @@ def main():
 
     loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
-    scaler = GradScaler()
+    try:
+        scaler = torch.amp.GradScaler('cuda')
+    except Exception:
+        scaler = GradScaler()
 
     start_epoch = 0
     best_val_dice = 0.0
@@ -276,8 +296,16 @@ def main():
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast():
-                outputs = model(inputs)
+            with torch.amp.autocast('cuda'):
+                try:
+                    outputs = model(inputs)
+                except RuntimeError as re:
+                    if "CUDNN" in str(re) or "cudnn" in str(re):
+                        log_print(f"cuDNN exception detected ({re}). Automatically falling back to native CUDA kernels...")
+                        torch.backends.cudnn.enabled = False
+                        outputs = model(inputs)
+                    else:
+                        raise re
                 loss = compute_multiscale_loss(loss_fn, outputs, labels)
 
             scaler.scale(loss).backward()
@@ -312,7 +340,7 @@ def main():
                     else:
                         continue
 
-                    with autocast():
+                    with torch.amp.autocast('cuda'):
                         val_out = sliding_window_inference(
                             inputs=val_img,
                             roi_size=tuple(args.patch_size),

@@ -124,7 +124,7 @@ def main():
                     print(f"Warning: Case {cid} not found in raw or prep directory, skipping.")
                     continue
 
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 outputs = sliding_window_inference(
                     inputs=inputs,
                     roi_size=tuple(args.patch_size),
