@@ -28,9 +28,9 @@ All 3 baseline architectures were trained on **I-SPY2 Fold 0** (785 train / 197 
 | **2. Standard 3D nnU-Net** *(With Deep Supervision)*| `0.7432 ± 0.171` | `0.7940` | `0.780 / 0.758` | `7.28 mm` | ✅ Completed (GCP L4) | `240 MB` |
 | **3. ResEnc-UNet L** *(Residual Encoder - Baseline)* | **`0.7793 ± 0.164`** | **`0.8207`** | **`0.798 / 0.814`** | **`4.36 mm`** | ✅ Completed (GCP L4) | `1.08 GB` |
 | *Elena Krikun et al. (EJR AI 2026, Table 2)* | `0.752 / 0.786` | `0.795 / 0.828` | `0.780 / 0.814` | `6.63 / 3.74 mm` | Reference Ground Truth | — |
-| **4. SwinUNETR V1** *(Hierarchical 3D ViT - MONAI)* | `0.6916 ± 0.218` | `0.7454` | `0.742 / 0.738` | `11.20 mm` | ✅ Completed (GCP L4) | `720 MB` |
-| **5. SwinUNETR V2** *(Stagewise ResConv + MergingV2)* | *Training...* | *Training...* | — | — | ⏳ In Progress (GCP L4) | `~730 MB` |
-| **6. MedNeXt-L k3** *(Modern 3D CNN - MICCAI 2023)* | — | — | — | — | 🚀 Ready for School GPU | — |
+| **4. SwinUNETR V1** *(Hierarchical 3D ViT - MONAI)* | **`0.7250 ± 0.184`** | **`0.7777`** | `0.774 / 0.730` | `13.60 mm` | ✅ Completed (GCP L4) | `720 MB` |
+| **5. SwinUNETR V2** *(Stagewise ResConv + MergingV2)* | **`0.6696 ± 0.192`** | **`0.7163`** | `0.676 / 0.761` | `12.06 mm` | ✅ Completed (GCP L4) | `840 MB` |
+| **6. MedNeXt-L k3** *(Modern 3D CNN - MICCAI 2023)* | — | — | — | — | 🚀 Training on School GPU | `~450 MB` |
 | **7. U-Mamba Bot 3D** *(State Space Model - 2024)* | **`0.7481 ± 0.179`** | **`0.8040`** | `0.785 / 0.771` | **`6.32 mm`** | ✅ Completed (GCP L4) | `240 MB` |
 | **8. PrimusV2** *(Pure 3D Transformer - 2024)* | — | — | — | — | 📋 Planned for Evaluation | — |
 
