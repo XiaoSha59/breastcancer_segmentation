@@ -108,64 +108,66 @@ class FastNpyBatchSampler:
 
             if self.is_b2nd:
                 img_h, seg_h = case_data
-                c, d, h, w = img_h.shape
-                # Decide foreground vs random (33% rule)
-                is_fg = (b_idx == 0 and random.random() < self.oversample_fg * batch_size)
-                
-                # Bounding box selection
-                pz, py, px = self.patch_size
-                z_max = max(0, d - pz)
-                y_max = max(0, h - py)
-                x_max = max(0, w - px)
+                shape = np.array(img_h.shape[1:])
 
-                sz = random.randint(0, z_max) if z_max > 0 else 0
-                sy = random.randint(0, y_max) if y_max > 0 else 0
-                sx = random.randint(0, x_max) if x_max > 0 else 0
-
-                ez = min(sz + pz, d)
-                ey = min(sy + py, h)
-                ex = min(sx + px, w)
-
-                img_crop = img_h[:, sz:ez, sy:ey, sx:ex]
-                seg_crop = seg_h[:, sz:ez, sy:ey, sx:ex]
-
-                # Zero padding if volume dimensions smaller than patch_size
-                cd, ch, cw = img_crop.shape[1], img_crop.shape[2], img_crop.shape[3]
-                if cd < pz or ch < py or cw < px:
-                    pad_z = pz - cd
-                    pad_y = py - ch
-                    pad_x = px - cw
-                    img_patch = np.pad(img_crop, ((0,0), (0, pad_z), (0, pad_y), (0, pad_x)), mode='constant')
-                    seg_patch = np.pad(seg_crop, ((0,0), (0, pad_z), (0, pad_y), (0, pad_x)), mode='constant')
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    img_data = np.array(img_h[:])
+                    seg_data = np.array(seg_h[:])
+                    pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    img_arr = np.pad(img_data, pad_width_img, mode="constant", constant_values=0)
+                    seg_arr = np.pad(seg_data, pad_width_seg, mode="constant", constant_values=0)
+                    shape = np.array(img_arr.shape[1:])
                 else:
-                    img_patch = img_crop
-                    seg_patch = seg_crop
+                    img_arr = img_h
+                    seg_arr = seg_h
+
+                seg_full = seg_arr[0]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg_full > 0)
+
+                if is_fg:
+                    fg_coords = np.argwhere(seg_full > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, np.maximum(0, shape - self.patch_size))
+                else:
+                    max_start = np.maximum(0, shape - self.patch_size)
+                    start = np.array([random.randint(0, m) if m > 0 else 0 for m in max_start])
+
+                s_0, s_1, s_2 = start
+                p_0, p_1, p_2 = self.patch_size
+                patch_img = img_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+                patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+
+                img_patch = np.array(patch_img, dtype=np.float32)
+                seg_patch = np.array(patch_seg, dtype=np.int64)
             else:
-                # Standard .npy with channels: [0:5] image, [5] seg
-                num_channels, d, h, w = case_data.shape
-                pz, py, px = self.patch_size
-                z_max = max(0, d - pz)
-                y_max = max(0, h - py)
-                x_max = max(0, w - px)
+                data = case_data
+                shape = np.array(data.shape[1:])
+                needs_pad = shape < self.patch_size
+                if np.any(needs_pad):
+                    pad_width = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
+                    data_arr = np.pad(data, pad_width, mode="constant", constant_values=0)
+                    shape = np.array(data_arr.shape[1:])
+                else:
+                    data_arr = data
 
-                sz = random.randint(0, z_max) if z_max > 0 else 0
-                sy = random.randint(0, y_max) if y_max > 0 else 0
-                sx = random.randint(0, x_max) if x_max > 0 else 0
+                seg = data_arr[5] if data_arr.shape[0] > 5 else data_arr[0]
+                is_fg = (random.random() < self.oversample_fg) and np.any(seg > 0)
 
-                ez = min(sz + pz, d)
-                ey = min(sy + py, h)
-                ex = min(sx + px, w)
+                if is_fg:
+                    fg_coords = np.argwhere(seg > 0)
+                    selected_coord = fg_coords[random.randint(0, len(fg_coords) - 1)]
+                    start = np.clip(selected_coord - self.patch_size // 2, 0, np.maximum(0, shape - self.patch_size))
+                else:
+                    max_start = np.maximum(0, shape - self.patch_size)
+                    start = np.array([random.randint(0, m) if m > 0 else 0 for m in max_start])
 
-                patch = case_data[:, sz:ez, sy:ey, sx:ex]
-                cd, ch, cw = patch.shape[1], patch.shape[2], patch.shape[3]
-                if cd < pz or ch < py or cw < px:
-                    pad_z = pz - cd
-                    pad_y = py - ch
-                    pad_x = px - cw
-                    patch = np.pad(patch, ((0,0), (0, pad_z), (0, pad_y), (0, pad_x)), mode='constant')
-
-                img_patch = patch[:5]
-                seg_patch = patch[5:6]
+                s_d, s_h, s_w = start
+                p_d, p_h, p_w = self.patch_size
+                patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
+                img_patch = patch[:5].astype(np.float32)
+                seg_patch = patch[5:6].astype(np.int64)
 
             # Convert to float32 image and int64 label
             img_tensor = torch.from_numpy(img_patch.astype(np.float32))
