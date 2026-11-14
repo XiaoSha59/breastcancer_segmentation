@@ -40,6 +40,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_200epochs", f"fold_{args.fold}")
+
     val_out_dir = os.path.join(args.output_dir, "validation")
     os.makedirs(val_out_dir, exist_ok=True)
 
