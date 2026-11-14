@@ -33,7 +33,7 @@ def main():
         time.sleep(30)
 
     print("=== STEP 2: UPLOADING PRIMUSV2 SCRIPTS ===")
-    scp_cmd = f"gcloud compute scp scripts/primus_v2.py scripts/train_primus_v2_fold0.py scripts/evaluate_primus_v2_fold0.py scripts/run_primus_v2_fold0.sh {VM_NAME}:/home/XiaoSha/project/scripts/ --zone={ZONE}"
+    scp_cmd = f"gcloud compute scp scripts/primus_v2.py scripts/train_primus_v2_fold0.py scripts/evaluate_primus_v2_fold0.py scripts/run_primus_v2_fold0.sh scripts/safety_guard.py {VM_NAME}:/home/XiaoSha/project/scripts/ --zone={ZONE}"
     out, err, code = run_cmd(scp_cmd)
     if code != 0:
         print(f"SCP warning/error: {err}")
