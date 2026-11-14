@@ -2,12 +2,13 @@
 """
 evaluate_swinunetr_v2_fold0.py
 ==============================
-Unified Independent Sliding-Window Inference & Full Evaluation for SwinUNETR V2 on Fold 0 (197 Val Cases).
-Compliant with 3D_UNET_BEST_PRACTICES.md:
-1. Evaluates directly on preprocessed nnUNetPlans_3d_fullres (.b2nd / .npy) to eliminate spatial distortion.
-2. Extracts physical spacing from metadata (.pkl) or raw NIfTI for accurate geometry headers.
-3. Automatically exports ground-truth masks to validation/gt_masks/ to enable HD95 & ASSD surface calculation.
-4. Produces summary.json and triggers compute_paper_metrics.py to match Elena Krikun et al. Table 2.
+Unified & Bulletproof Sliding-Window Inference & Full Evaluation for SwinUNETR V2 on Fold 0 (197 Val Cases).
+Compliant with 3D_UNET_BEST_PRACTICES.md & Official nnU-Net Protocol:
+1. Evaluates directly on preprocessed nnUNetPlans_3d_fullres (.b2nd / .npy) in resampled model space.
+2. Automatically pads volumes if any dimension < patch_size [96, 96, 96], then unpads to original size.
+3. Applies Gaussian importance weighting (mode='gaussian') matching nnU-Net's seamless patch fusion.
+4. Restores physical geometry headers from metadata (.pkl) to export clean prediction & ground-truth NIfTI masks.
+5. Computes Dice, IoU, Precision, Recall and triggers compute_paper_metrics.py to calculate HD95 & ASSD.
 """
 
 import os
@@ -53,6 +54,7 @@ def main():
         alt_splits = [
             "/home/XiaoSha/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json",
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
         ]
         for asp in alt_splits:
             if os.path.exists(asp):
@@ -90,7 +92,6 @@ def main():
         print(f"Preprocessed Directory: {prep_dir}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # SwinUNETR V2 model definition
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
@@ -114,6 +115,7 @@ def main():
 
     print(f"Running sliding window inference on {len(val_ids)} validation cases...")
     eval_start = time.time()
+    pz, py, px = args.patch_size
 
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
@@ -124,28 +126,42 @@ def main():
                     import blosc2
                     img_h = blosc2.open(b2nd_path)
                     seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                    inputs = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
-                    lbl_arr = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    img_raw = np.array(img_h[:], dtype=np.float32)
+                    lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                 elif os.path.exists(npy_path):
                     case_data = np.load(npy_path, mmap_mode="r")
-                    inputs = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
-                    lbl_arr = (case_data[5] > 0).astype(np.uint8)
+                    img_raw = case_data[:5].astype(np.float32)
+                    lbl_raw = (case_data[5] > 0).astype(np.uint8)
                 else:
                     print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
                     continue
             elif has_raw:
                 imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
                 lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                img_data = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
                 for c in range(5):
-                    mask = img_data[c] != 0
+                    mask = img_raw[c] != 0
                     if np.any(mask):
-                        img_data[c][mask] = (img_data[c][mask] - img_data[c][mask].mean()) / (img_data[c][mask].std() + 1e-8)
-                lbl_arr = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
-                inputs = torch.from_numpy(img_data).unsqueeze(0).to(device)
+                        img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
             else:
                 print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                 continue
+
+            # Original dimensions: C, D, H, W
+            _, orig_d, orig_h, orig_w = img_raw.shape
+
+            # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
+            pad_d = max(0, pz - orig_d)
+            pad_h = max(0, py - orig_h)
+            pad_w = max(0, px - orig_w)
+
+            if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
+            else:
+                img_padded = img_raw
+
+            inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
 
             with autocast():
                 outputs = sliding_window_inference(
@@ -154,19 +170,21 @@ def main():
                     sw_batch_size=2,
                     predictor=model,
                     overlap=0.5,
+                    mode="gaussian",
                 )
 
             prob = torch.softmax(outputs, dim=1)[:, 1:2]
             pred = (prob > 0.5).float()
 
-            pred_np = pred.squeeze().cpu().numpy().astype(np.uint8)
-            label_np = lbl_arr
+            # Safely extract 3D prediction and crop back to original shape
+            pred_3d = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
+            label_3d = lbl_raw[:orig_d, :orig_h, :orig_w]
 
             # Metric computations
-            intersection = np.logical_and(pred_np, label_np).sum()
-            union = np.logical_or(pred_np, label_np).sum()
-            pred_sum = pred_np.sum()
-            label_sum = label_np.sum()
+            intersection = np.logical_and(pred_3d, label_3d).sum()
+            union = np.logical_or(pred_3d, label_3d).sum()
+            pred_sum = pred_3d.sum()
+            label_sum = label_3d.sum()
 
             if label_sum == 0 and pred_sum == 0:
                 dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
@@ -190,10 +208,11 @@ def main():
                 "Precision": float(prec),
             }
 
-            # Extract accurate physical geometry
+            # Physical geometry recovery from metadata (.pkl) or raw image
             spacing = (1.0, 1.0, 1.0)
             origin = (0.0, 0.0, 0.0)
             direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
             if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
                 ref_img = sitk.ReadImage(os.path.join(labels_dir, f"{cid}.nii.gz"))
                 spacing = ref_img.GetSpacing()
@@ -210,18 +229,18 @@ def main():
                     except Exception:
                         pass
 
-            pred_img = sitk.GetImageFromArray(pred_np)
+            pred_img = sitk.GetImageFromArray(pred_3d)
             pred_img.SetSpacing(spacing)
             pred_img.SetOrigin(origin)
             pred_img.SetDirection(direction)
             sitk.WriteImage(pred_img, os.path.join(val_out_dir, f"{cid}.nii.gz"))
 
-            # Also export ground truth mask to gt_masks/ for HD95 / ASSD calculation
+            # Also export ground truth mask to validation/gt_masks/ for HD95 / ASSD calculation
             gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
             os.makedirs(gt_dir_for_eval, exist_ok=True)
             gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
             if not os.path.exists(gt_nii_path):
-                gt_img = sitk.GetImageFromArray(label_np)
+                gt_img = sitk.GetImageFromArray(label_3d)
                 gt_img.SetSpacing(spacing)
                 gt_img.SetOrigin(origin)
                 gt_img.SetDirection(direction)

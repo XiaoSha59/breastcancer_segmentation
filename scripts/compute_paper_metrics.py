@@ -131,9 +131,13 @@ Median ASSD              {median_assd:.2f} mm                   0.95 mm (approx)
     out_txt = os.path.join(results_dir, "paper_metrics_summary.txt")
     with open(out_txt, "w", encoding="utf-8") as f:
         f.write(report)
-    with open("/home/XiaoSha/evaluation_standard_fold0.txt", "w", encoding="utf-8") as f:
-        f.write(report)
-    print(f"Report saved to:\n  - {out_txt}\n  - /home/XiaoSha/evaluation_standard_fold0.txt")
+    home_report = os.path.expanduser("~/evaluation_standard_fold0.txt")
+    try:
+        with open(home_report, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"Report saved to:\n  - {out_txt}\n  - {home_report}")
+    except Exception:
+        print(f"Report saved to:\n  - {out_txt}")
 
 if __name__ == "__main__":
     main()
