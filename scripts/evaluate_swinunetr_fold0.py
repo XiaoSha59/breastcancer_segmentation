@@ -186,8 +186,10 @@ def main():
 
             if label_sum == 0 and pred_sum == 0:
                 dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
-            elif label_sum == 0 or pred_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, (0.0 if label_sum > 0 else 1.0), (0.0 if pred_sum > 0 else 1.0)
+            elif pred_sum == 0:
+                dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
+            elif label_sum == 0:
+                dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
             else:
                 dice = 2.0 * intersection / (pred_sum + label_sum)
                 iou = intersection / union
