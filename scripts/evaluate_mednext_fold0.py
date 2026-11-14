@@ -94,19 +94,19 @@ def main():
     else:
         prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
 
+    pz, py, px = args.patch_size
+
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
             if has_raw:
                 imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
                 lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                img_data = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
-                # Channel-wise non-zero normalization
+                img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
                 for c in range(5):
-                    mask = img_data[c] != 0
+                    mask = img_raw[c] != 0
                     if np.any(mask):
-                        img_data[c][mask] = (img_data[c][mask] - img_data[c][mask].mean()) / (img_data[c][mask].std() + 1e-8)
-                lbl_arr = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
-                inputs = torch.from_numpy(img_data).unsqueeze(0).to(device)
+                        img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
             else:
                 b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
                 npy_path = os.path.join(prep_dir, f"{cid}.npy")
@@ -114,15 +114,30 @@ def main():
                     import blosc2
                     img_h = blosc2.open(b2nd_path)
                     seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                    inputs = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
-                    lbl_arr = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    img_raw = np.array(img_h[:], dtype=np.float32)
+                    lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                 elif os.path.exists(npy_path):
                     case_data = np.load(npy_path, mmap_mode="r")
-                    inputs = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
-                    lbl_arr = (case_data[5] > 0).astype(np.uint8)
+                    img_raw = case_data[:5].astype(np.float32)
+                    lbl_raw = (case_data[5] > 0).astype(np.uint8)
                 else:
                     print(f"Warning: Case {cid} not found in raw or prep directory, skipping.")
                     continue
+
+            # Original dimensions: C, D, H, W
+            _, orig_d, orig_h, orig_w = img_raw.shape
+
+            # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
+            pad_d = max(0, pz - orig_d)
+            pad_h = max(0, py - orig_h)
+            pad_w = max(0, px - orig_w)
+
+            if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
+            else:
+                img_padded = img_raw
+
+            inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
 
             with torch.amp.autocast('cuda'):
                 outputs = sliding_window_inference(
@@ -131,13 +146,17 @@ def main():
                     sw_batch_size=2,
                     predictor=model,
                     overlap=0.5,
+                    mode="gaussian",
                 )
+
+            if isinstance(outputs, list):
+                outputs = outputs[0]
 
             prob = torch.softmax(outputs, dim=1)[:, 1:2]
             pred = (prob > 0.5).float()
 
-            pred_np = pred.squeeze().cpu().numpy().astype(np.uint8)
-            label_np = lbl_arr
+            pred_np = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
+            label_np = lbl_raw[:orig_d, :orig_h, :orig_w]
 
             intersection = np.logical_and(pred_np, label_np).sum()
             union = np.logical_or(pred_np, label_np).sum()
