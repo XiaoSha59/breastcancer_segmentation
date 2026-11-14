@@ -36,13 +36,35 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", f"PrimusV2_{args.model_id}_200epochs", f"fold_{args.fold}")
+
     val_out_dir = os.path.join(args.output_dir, "validation")
     os.makedirs(val_out_dir, exist_ok=True)
 
     checkpoint_best = os.path.join(args.output_dir, "checkpoint_best.pth")
     if not os.path.exists(checkpoint_best):
+        checkpoint_best = os.path.join(args.output_dir, "checkpoint_latest.pth")
+    if not os.path.exists(checkpoint_best):
         print(f"Error: {checkpoint_best} not found!")
         sys.exit(1)
+
+    # Auto-resolve splits_file if default does not exist
+    if not os.path.exists(args.splits_file):
+        candidate_splits = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+        ]
+        for csp in candidate_splits:
+            if os.path.exists(csp):
+                args.splits_file = csp
+                break
 
     with open(args.splits_file, "r") as f:
         splits = json.load(f)
@@ -52,7 +74,19 @@ def main():
     if args.prep_dir and os.path.isdir(args.prep_dir):
         prep_dir = args.prep_dir
     else:
-        prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
+        candidate_prep = [
+            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+        ]
+        prep_dir = ""
+        for cpr in candidate_prep:
+            if os.path.isdir(cpr):
+                prep_dir = cpr
+                break
+        if not prep_dir:
+            prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = create_primus_v2(

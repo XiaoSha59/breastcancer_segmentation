@@ -231,6 +231,39 @@ class FastNpyBatchSampler:
 
 def main():
     args = parse_args()
+
+    # Auto-resolve splits_file if default does not exist
+    if not os.path.exists(args.splits_file):
+        candidate_splits = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+        ]
+        for csp in candidate_splits:
+            if os.path.exists(csp):
+                args.splits_file = csp
+                break
+
+    # Auto-resolve prep_dir if default does not exist
+    if not os.path.isdir(args.prep_dir):
+        candidate_prep = [
+            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+        ]
+        for cpr in candidate_prep:
+            if os.path.isdir(cpr):
+                args.prep_dir = cpr
+                break
+
+    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", f"PrimusV2_{args.model_id}_200epochs", f"fold_{args.fold}")
+
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "train.log")
 
@@ -247,6 +280,9 @@ def main():
     log_print(f"PyTorch Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         log_print(f"Device: {torch.cuda.get_device_name(0)}, Total VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
+    if not os.path.exists(args.splits_file):
+        raise FileNotFoundError(f"Splits file not found: {args.splits_file}")
 
     with open(args.splits_file, "r") as f:
         splits = json.load(f)
