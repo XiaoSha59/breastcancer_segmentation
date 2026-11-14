@@ -267,6 +267,14 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "train.log")
 
+    # Fixed CPU Thread Allocation for node1 (Intel i9-7900X): strictly 4 threads
+    torch.set_num_threads(4)
+    if hasattr(torch, "set_num_interop_threads"):
+        try:
+            torch.set_num_interop_threads(2)
+        except RuntimeError:
+            pass
+
     def log_print(msg):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         formatted = f"[{ts}] {msg}"
