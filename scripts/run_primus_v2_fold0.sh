@@ -5,7 +5,7 @@
 # Architecture: PrimusV2-S (MICCAI / TMLR 2024 - Tassilo Wald, Fabian Isensee, DKFZ).
 # Preprocess Strategy: 100% REUSE of existing nnUNetPlans_3d_fullres (.b2nd / .npy).
 # Hardware Safety: Tailored for NVIDIA L4 24GB.
-# Auto-shutdown: 2-layer fail-safe (Layer 1: Bash trap on EXIT/ERR; Layer 2: Python watchdog).
+# Auto-shutdown: Triggers ONLY on SUCCESS ($EXIT_STATUS == 0) to avoid premature poweroff on error.
 # ==============================================================================
 
 set -e
@@ -29,9 +29,13 @@ cleanup() {
     EXIT_STATUS=$?
     echo "[$(date)] PrimusV2 run script exiting with status $EXIT_STATUS."
     if [ "${AUTO_SHUTDOWN:-1}" = "1" ] || [ "${GCP_CLOUD_INSTANCE:-1}" = "1" ]; then
-        echo "[$(date)] [Cloud Trap] Auto-shutdown active. Waiting 120s before powering off VM to save billing..."
-        sleep 120
-        sudo /sbin/shutdown -h now || sudo poweroff || true
+        if [ $EXIT_STATUS -eq 0 ]; then
+            echo "[$(date)] [Cloud Trap] Auto-shutdown active on SUCCESS. Waiting 120s before powering off VM..."
+            sleep 120
+            sudo /sbin/shutdown -h now || sudo poweroff || true
+        else
+            echo "[$(date)] [Cloud Trap] Script exited with ERROR ($EXIT_STATUS). Preserving VM state for inspection (no premature shutdown)."
+        fi
     fi
 }
 trap cleanup EXIT ERR INT TERM
