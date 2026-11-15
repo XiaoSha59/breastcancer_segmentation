@@ -24,6 +24,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -143,8 +144,8 @@ class FastNpyBatchSampler:
                         patch_img = img_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
-                        img_patch = np.array(patch_img, dtype=np.float32)
-                        seg_patch = (np.array(patch_seg) > 0).astype(np.int64)
+                        img_patch = np.array(patch_img[:5], dtype=np.float32)
+                        seg_patch = (np.array(patch_seg[:1]) > 0).astype(np.int64)
                     else:
                         data = case_data
                         shape = np.array(data.shape[1:])
@@ -353,7 +354,7 @@ def main():
                         import blosc2
                         img_h = blosc2.open(b2nd_path)
                         seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
-                        val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                        val_img = torch.from_numpy(np.array(img_h[:5], dtype=np.float32)).unsqueeze(0).to(device)
                         val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                     elif os.path.exists(npy_path):
                         case_data = np.load(npy_path, mmap_mode="r")

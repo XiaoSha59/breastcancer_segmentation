@@ -123,7 +123,7 @@ def main():
                 import blosc2
                 img_h = blosc2.open(b2nd_path)
                 seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                img_raw = np.array(img_h[:], dtype=np.float32)
+                img_raw = np.array(img_h[:5], dtype=np.float32)
                 lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
             elif os.path.exists(npy_path):
                 case_data = np.load(npy_path, mmap_mode="r")
