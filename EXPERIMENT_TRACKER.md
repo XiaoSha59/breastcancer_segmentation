@@ -26,12 +26,12 @@
 | 3 | **Vanilla 3D U-Net** | `nnU-Net v2 (Plain Conv)` | **HOÀN TẤT** | 0.7180 | 0.7721 | `checkpoints/vanilla_3dunet_fold0_checkpoint_best.pth` |
 | 4 | **U-Mamba Bot 3D** | `bowang-lab/U-Mamba` (MICCAI 2024) | **HOÀN TẤT** | 0.7481 | 0.8040 | `checkpoints/umamba_fold0_checkpoint_best.pth` |
 | 5 | **SwinUNETR v1** | `MONAI (SwinTransformer)` | **HOÀN TẤT** | 0.6652 | 0.7104 | `checkpoints/swinunetr_fold0_checkpoint_best.pth` |
-| 6 | **MedNeXt-L k3** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | 0.7347 | 0.7924 | `results/.../MedNeXt_L_k3_200epochs/fold_0/`<br>`checkpoints/mednext_l_k3_fold0_checkpoint_best.pth` |
-| 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **SẴN SÀNG (GCP L4)** | -- | -- | Script: `scripts/run_segmamba_gcp.sh` |
-| 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | -- | -- | Đang chạy trong tmux `swin_v2` trên node1 |
-| 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **CHỜ CHẠY TIẾP** | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
+| 6 | **MedNeXt-L k3** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | 0.7347 | 0.7924 | `results/.../MedNeXt_L_k3_200epochs/fold_0/`<br>`checkpoints/mednext_l_k3_fold0_checkpoint_best.pth` (414 MB) |
+| 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **ĐANG CHẠY (GCP L4)** | *(0.4162 tại Ep 4)* | -- | GCP VM `cancer-seg-gpu` (BFloat16, tmux `segmamba`) |
+| 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | *(0.6140 tại Ep 39)* | -- | Server `node1` RTX 4090 (Ep 45+, tmux `swinunetr_v2`) |
+| 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **SẴN SÀNG (node1)** | -- | -- | Đã vá 100%, chờ SwinUNETR v2 xong để chạy tiếp |
 
-> *Ghi chú*: Toàn bộ 6 mô hình đã hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\`).
+> *Ghi chú*: Toàn bộ 6 mô hình đã hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\checkpoints\`).
 
 ---
 
