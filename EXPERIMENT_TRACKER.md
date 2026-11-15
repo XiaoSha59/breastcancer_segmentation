@@ -25,7 +25,7 @@
 | 2 | **ResEnc-UNet L** | `nnU-Net v2 / dynamic-net` | **HOÀN TẤT** | 0.7513 | 0.8034 | `checkpoints/resenc_l_fold0_checkpoint_best.pth` |
 | 3 | **Vanilla 3D U-Net** | `nnU-Net v2 (Plain Conv)` | **HOÀN TẤT** | 0.7180 | 0.7721 | `checkpoints/vanilla_3dunet_fold0_checkpoint_best.pth` |
 | 4 | **U-Mamba Bot 3D** | `bowang-lab/U-Mamba` (MICCAI 2024) | **HOÀN TẤT** | 0.7481 | 0.8040 | `checkpoints/umamba_fold0_checkpoint_best.pth` |
-| 5 | **SwinUNETR v1** | `MONAI (SwinTransformer)` | **HOÀN TẤT** | 0.6652 | 0.7104 | `checkpoints/swinunetr_fold0_checkpoint_best.pth` |
+| 5 | **SwinUNETR v1** | `MONAI (SwinTransformer)` | **HOÀN TẤT** | **0.7906** | **0.7950** | `checkpoints/swinunetr_fold0_checkpoint_best.pth` |
 | 6 | **MedNeXt-L k3** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | 0.7347 | 0.7924 | `results/.../MedNeXt_L_k3_200epochs/fold_0/`<br>`checkpoints/mednext_l_k3_fold0_checkpoint_best.pth` (414 MB) |
 | 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **ĐANG CHẠY (GCP L4)** | *(0.4162 tại Ep 4)* | -- | GCP VM `cancer-seg-gpu` (BFloat16, tmux `segmamba`) |
 | 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | *(0.6140 tại Ep 39)* | -- | Server `node1` RTX 4090 (Ep 45+, tmux `swinunetr_v2`) |
