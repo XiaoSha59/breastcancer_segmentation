@@ -16,6 +16,15 @@ Tài liệu này tổng hợp toàn bộ các **nguyên tắc bắt buộc từ 
     * Chỉ kéo đúng dữ liệu preprocessed cần thiết (không kéo thừa).
     * Code huấn luyện chỉ lưu duy nhất 2 file trọng số: `checkpoint_best.pth` và `checkpoint_final.pth` (~250 MB mỗi file), tuyệt đối không lưu checkpoint theo từng epoch làm phình ổ cứng.
 
+### 0.1 ⛔ NGUYÊN TẮC TOÀN VẸN MÃ NGUỒN: BẮT BUỘC DÙNG 100% MÃ NGUỒN GỐC CÔNG BỐ, CẤM TỰ CHẾ
+* **Yêu cầu bắt buộc:**
+  * Mọi mô hình (MedNeXt, SwinUNETR, Primus, U-Mamba, SegMamba) **BẮT BUỘC phải lấy trực tiếp từ repository chính thức của tác giả công bố** hoặc thư viện chuẩn quốc tế (MONAI, nnU-Net, dynamic-network-architectures).
+  * **Tuyệt đối CẤM tự ý viết lại (re-implement), tự ý đơn giản hóa hay tự chế kiến trúc**.
+  * Chỉ được phép sửa đúng 2 tham số: `in_channels` (5 pha DCE-MRI) và `num_classes` (2 lớp Background, Tumor).
+* **Lý do an toàn máy chủ & học thuật:**
+  * Các bản code "tự chế" tiềm ẩn nguy cơ bùng nổ chiều batch (như lỗi batch 32.768 trong SegMamba nháp) gây tràn RAM, kích hoạt Linux OOM-Killer làm sập toàn bộ máy chủ trường và ảnh hưởng đến các thành viên khác trong phòng lab.
+  * Làm sai lệch bản chất mô hình khiến kết quả trong luận văn/bài báo bị bác bỏ hoàn toàn.
+
 ### 1. 🚫 CẤM DÙNG NOTEBOOK (`.ipynb`) – 100% CHẠY QUA TERMINAL SCRIPT (`.py`)
 * **Lý do:**
   * Jupyter Notebook giữ chặt toàn bộ VRAM GPU ngay cả khi cell chạy xong, khiến các thành viên khác trong phòng lab không có tài nguyên để dùng.

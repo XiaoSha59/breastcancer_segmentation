@@ -4,6 +4,23 @@ Tài liệu đúc kết toàn bộ kinh nghiệm thực tế, bài học xương
 
 ---
 
+## 0. ⛔ NGUYÊN TẮC BẤT KHẢ XÂM PHẠM: BẮT BUỘC DÙNG MÃ NGUỒN GỐC CÔNG BỐ CỦA TÁC GIẢ – TUYỆT ĐỐI KHÔNG TỰ CHẾ
+
+Trong nghiên cứu khoa học và thực nghiệm so sánh mô hình (Benchmark / Baseline Comparison):
+1. **Tuyệt đối KHÔNG tự ý viết lại (re-implement), đơn giản hóa hay tự chế kiến trúc mô hình**:
+   - Mọi mô hình so sánh (MedNeXt, SwinUNETR, Primus, U-Mamba, SegMamba,...) **BẮT BUỘC** phải được lấy trực tiếp 100% nguyên bản từ repository chính thức của nhóm tác giả đã công bố tại các hội nghị/tạp chí uy tín (MICCAI, CVPR, ICCV, Nature, IEEE) hoặc từ các thư viện chuẩn quốc tế đã kiểm định (MONAI, nnU-Net, dynamic-network-architectures).
+2. **Không tự ý thay đổi cơ chế toán tử**:
+   - Không được tự ý thay đổi cách tokenize, cách quét chiều không gian, các khối trích xuất đặc trưng cục bộ (như GSC trong SegMamba, Inverted Bottleneck trong MedNeXt, hay Shifted Window trong SwinUNETR).
+3. **Chỉ được phép điều chỉnh đúng tham số kích thước đầu vào / đầu ra của bài toán**:
+   - `in_channels` (ví dụ: 5 pha DCE-MRI thay vì ảnh não 4 kênh).
+   - `num_classes` (ví dụ: 2 lớp Background, Tumor thay vì đa lớp).
+   - `patch_size` phù hợp bộ nhớ card GPU theo đúng chuẩn kế hoạch của nnU-Net.
+4. **Hậu quả nếu tự chế kiến trúc**:
+   - Sai lệch bản chất mô hình, làm vô hiệu hóa giá trị so sánh khoa học của bài báo/luận văn.
+   - Nguy cơ bùng nổ bộ nhớ Autograd, tràn VRAM và làm sập máy chủ phòng lab.
+
+---
+
 ## 1. Nguyên Tắc So Sánh Mô Hình Công Bằng (Fair Baseline Comparison)
 
 Khi thực hiện nghiên cứu khoa học hoặc viết báo cáo học thuật, việc so sánh giữa các kiến trúc (Ablation Study / Baseline Comparison) đòi hỏi tính kiểm soát biến số nghiêm ngặt:
