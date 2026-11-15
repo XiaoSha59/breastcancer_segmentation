@@ -353,35 +353,43 @@ def main():
                 # Evaluate on a random subset of 20 val cases during training for fast EMA tracking
                 sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
                 for cid in sub_val_ids:
-                    b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
-                    npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
-                    if os.path.exists(b2nd_path):
-                        import blosc2
-                        img_h = blosc2.open(b2nd_path)
-                        seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
-                        val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
-                        val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
-                    elif os.path.exists(npy_path):
-                        case_data = np.load(npy_path, mmap_mode="r")
-                        val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
-                        val_lbl = (case_data[5] > 0).astype(np.uint8)
-                    else:
+                    try:
+                        b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
+                        npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
+                        if os.path.exists(b2nd_path):
+                            import blosc2
+                            img_h = blosc2.open(b2nd_path)
+                            seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
+                            n_chans = min(5, img_h.shape[0])
+                            val_arr = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
+                            for c in range(n_chans):
+                                val_arr[c] = img_h[c]
+                            val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
+                            val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                        elif os.path.exists(npy_path):
+                            case_data = np.load(npy_path, mmap_mode="r")
+                            val_img = torch.from_numpy(case_data[:5].astype(np.float32)).unsqueeze(0).to(device)
+                            val_lbl = (case_data[5] > 0).astype(np.uint8)
+                        else:
+                            continue
+
+                        with autocast():
+                            val_out = sliding_window_inference(
+                                inputs=val_img,
+                                roi_size=tuple(args.patch_size),
+                                sw_batch_size=2,
+                                predictor=model,
+                                overlap=0.5,
+                            )
+
+                        pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
+                        inter = np.logical_and(pred, val_lbl).sum()
+                        union = pred.sum() + val_lbl.sum()
+                        dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
+                        val_dices.append(dice)
+                    except Exception as e:
+                        log_print(f"Warning: Failed to evaluate val case {cid}: {e}. Skipping.")
                         continue
-
-                    with autocast():
-                        val_out = sliding_window_inference(
-                            inputs=val_img,
-                            roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
-                            predictor=model,
-                            overlap=0.5,
-                        )
-
-                    pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
-                    inter = np.logical_and(pred, val_lbl).sum()
-                    union = pred.sum() + val_lbl.sum()
-                    dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
-                    val_dices.append(dice)
 
             mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
             is_best = mean_val_dice > best_val_dice
