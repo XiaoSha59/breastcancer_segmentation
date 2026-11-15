@@ -10,7 +10,9 @@
 
 set -e
 
-export PATH="/home/XiaoSha/.local/bin:$PATH"
+export CUDA_HOME="/usr/local/cuda"
+export PATH="/usr/local/cuda/bin:/home/XiaoSha/.local/bin:$PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
 export OMP_NUM_THREADS=4
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
