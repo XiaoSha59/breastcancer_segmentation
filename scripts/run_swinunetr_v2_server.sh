@@ -143,12 +143,12 @@ if [ "$NUM_EPOCHS" -ge 200 ]; then
         --splits_file "$SPLITS_FILE" \
         --output_dir "$RESULTS_DIR" \
         --fold 0 \
-        --patch_size 96 96 96
+        --patch_size 96 96 96 \
+        --feature_size 48 \
+        --num_workers 4 || echo "Evaluation warning: Check validation logs"
 else
-    echo "Notice: Running short smoke test ($NUM_EPOCHS epochs < 200). Skipping 50-minute full validation."
-fi \
-    --feature_size 48 \
-    --num_workers 4 || echo "Evaluation warning: Check validation logs"
+    echo "Notice: Running short smoke test ($NUM_EPOCHS epochs < 200). Skipping full validation."
+fi
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
 python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "SwinUNETR V2 (Fold 0, 200 epochs)" || echo "Metrics warning"
