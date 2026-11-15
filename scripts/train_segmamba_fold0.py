@@ -280,12 +280,17 @@ def main():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log_print(f"SegMamba initialized. Trainable parameters: {total_params / 1e6:.2f}M")
 
-    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True, include_background=False)
+    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
+
+    # Mamba Selective Scan requires high dynamic range (BFloat16 or Float32) to prevent FP16 recurrence overflow
+    use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    amp_dtype = torch.bfloat16 if use_bf16 else torch.float32
+    log_print(f"Hardware precision for SegMamba: {amp_dtype} (BFloat16 hardware-accelerated: {use_bf16})")
     try:
-        scaler = torch.amp.GradScaler('cuda')
+        scaler = torch.amp.GradScaler('cuda', enabled=(amp_dtype == torch.float16))
     except Exception:
-        scaler = GradScaler()
+        scaler = GradScaler(enabled=(amp_dtype == torch.float16))
 
     start_epoch = 0
     best_val_dice = 0.0
@@ -320,11 +325,11 @@ def main():
         for it in range(args.iterations_per_epoch):
             images, labels = train_sampler.sample_batch(args.batch_size)
             images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            labels = torch.clamp(labels.to(device, non_blocking=True), 0, 1).long()
 
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.amp.autocast('cuda'):
+            with torch.amp.autocast('cuda', dtype=amp_dtype):
                 logits = model(images)
                 loss = loss_fn(logits, labels)
 
@@ -379,7 +384,7 @@ def main():
                         else:
                             val_img_pad = val_img
 
-                        with torch.amp.autocast('cuda'):
+                        with torch.amp.autocast('cuda', dtype=amp_dtype):
                             val_out = sliding_window_inference(
                                 inputs=val_img_pad,
                                 roi_size=tuple(args.patch_size),
