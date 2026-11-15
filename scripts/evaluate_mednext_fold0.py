@@ -87,6 +87,11 @@ def main():
     has_raw = os.path.exists(images_dir) and len(os.listdir(images_dir)) > 0
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     model = create_mednext_v1(
         num_channels=5,
         num_classes=2,

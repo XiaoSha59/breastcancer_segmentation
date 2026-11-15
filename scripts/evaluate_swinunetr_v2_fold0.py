@@ -98,6 +98,11 @@ def main():
         print(f"Preprocessed Directory: {prep_dir}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
