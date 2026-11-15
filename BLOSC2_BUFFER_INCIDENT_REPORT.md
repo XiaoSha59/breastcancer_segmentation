@@ -102,3 +102,30 @@ Cụ thể qua phân tích định lượng hiệu năng (profiling):
   - Độ trễ chênh lệch giữa 1 lần đọc và 5 lần đọc (~0.01s) hoàn toàn bị che khuất và biến mất trong tổng thời gian forward pass của GPU.
 
 **Kết luận**: Kỹ thuật giải nén từng pha đảm bảo 100% an toàn bộ nhớ RAM/VRAM, tránh hoàn toàn crash sập server, đồng thời tốc độ huấn luyện trên thực tế vẫn duy trì nguyên vẹn ở mức ~171 giây/epoch.
+
+---
+
+## 6. SỰ CỐ TIẾP THEO: CUDA SCATTERGATHER ASSERTION TẠI ĐẦU EPOCH 21 & CÁCH KHẮC PHỤC
+
+### 6.1 Hiện tượng
+* Epoch 19 Validation chạy thành công mượt mà: `Validation Epoch 019 | Proxy Val Dice: 0.5779 (Best: 0.5856)`.
+* Epoch 20 Train hoàn tất trong 171.6s (`Train Loss: 0.2974`) và lưu checkpoint `checkpoint_latest.pth`.
+* Đầu Epoch 21, tiến trình gặp lỗi CUDA:
+  ```text
+  /pytorch/aten/src/ATen/native/cuda/ScatterGatherKernel.cu:365: Assertion `idx_dim >= 0 && idx_dim < index_size && "index out of bounds"` failed.
+  RuntimeError: CUDA error: device-side assert triggered at scaler.scale(loss).backward()
+  ```
+
+### 6.2 Nguyên nhân kỹ thuật
+1. **Xung đột của `use_checkpoint=True` trong PyTorch 2.x**:
+   - Khi bật Gradient Checkpointing (`use_checkpoint=True`) trong MONAI SwinUNETR v2, PyTorch phải tính toán lại (recompute) toàn bộ forward graph trong pha backward.
+   - Khi tái tính toán đồ thị Swin Transformer Block kết hợp với tính toán mất mát phân lớp DiceCELoss, cơ chế recompute của `torch.utils.checkpoint` trên PyTorch 2.x gây ra lỗi xung đột bộ chỉ số (tensor index mismatch) trong kernel `ScatterGatherKernel.cu:365`.
+2. **Card RTX 4090 có tận 24 GB VRAM**:
+   - SwinUNETR v2 với patch `(96, 96, 96)` và batch size 2 chỉ tiêu tốn khoảng **10 - 12 GB VRAM**.
+   - Việc bật `use_checkpoint=True` là hoàn toàn dư thừa trên phần cứng 24 GB, vừa làm giảm tốc độ (phải chạy forward 2 lần) vừa gây ra lỗi device-side assert của PyTorch.
+
+### 6.3 Giải pháp khắc phục triệt để
+1. Đưa `use_checkpoint` thành tham số dòng lệnh `--use_checkpoint` với mặc định là `False` trên RTX 4090.
+2. Thêm bảo vệ `torch.clamp(labels, 0, 1).long()` trước khi đưa vào hàm loss để đảm bảo nhãn lớp tuyệt đối nằm trong khoảng [0, 1].
+3. Chuyển đổi sang `torch.amp.autocast('cuda')` và `torch.amp.GradScaler('cuda')` chuẩn của PyTorch 2.x để loại bỏ các cảnh báo deprecated.
+4. Checkpoint Epoch 20 đã được lưu an toàn tại `checkpoint_latest.pth`, lệnh `--resume` sẽ tiếp tục chạy từ Epoch 21 mà không bị mất dữ liệu đã học.
