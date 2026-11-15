@@ -5,6 +5,13 @@
 
 ---
 
+## ⛔ QUY TẮC BẤT DI BẤT DỊCH VỀ MẠNG TRÊN SERVER TRƯỜNG (`node1`)
+- **SERVER TRƯỜNG KHÔNG KẾT NỐI GITHUB**: Máy chủ `node1` không có tài khoản/khóa kết nối GitHub, **TUYỆT ĐỐI CẤM dùng lệnh `git pull` hoặc `git clone` trên server trường**.
+- **Cơ chế cập nhật mã nguồn**: Mọi cập nhật code từ máy cá nhân lên server trường được đưa qua đường SCP trung chuyển (hoặc user tự copy vào thư mục). Các file code mới nhất hiện **ĐÃ ĐƯỢC CẬP NHẬT TRỰC TIẾP VÀO SERVER TRƯỜNG**.
+- **Khi chạy chỉ cần vào thư mục và gọi script trực tiếp trong `tmux`**, không gõ bất kỳ lệnh git nào.
+
+---
+
 ## 1. BẢNG TIẾN ĐỘ TỔNG HỢP TOÀN BỘ CÁC MÔ HÌNH (MODEL PORTFOLIO)
 
 | STT | Kiến trúc mô hình | Nguồn gốc mã nguồn | Trạng thái | Điểm Mean Dice | Điểm Median Dice | Vị trí Checkpoint & Kết quả (.pth, log) |
@@ -92,7 +99,6 @@ Cả 3 mô hình đều chạy trên card đồ họa **NVIDIA RTX 4090 24GB**:
 #### Bước 1: Chạy SegMamba 3D
 ```bash
 cd ~/breastcancer_segmentation
-git pull origin main
 tmux new -s segmamba
 bash scripts/run_segmamba_server.sh
 ```
@@ -100,12 +106,14 @@ bash scripts/run_segmamba_server.sh
 
 #### Bước 2: Chạy SwinUNETR v2 (Sau khi SegMamba xong)
 ```bash
+cd ~/breastcancer_segmentation
 tmux new -s swinunetr_v2
 bash scripts/run_swinunetr_v2_server.sh
 ```
 
 #### Bước 3: Chạy PrimusV2-S (Sau khi SwinUNETR v2 xong)
 ```bash
+cd ~/breastcancer_segmentation
 tmux new -s primus_v2
 bash scripts/run_primus_v2_server.sh
 ```
@@ -117,7 +125,6 @@ Chỉ cần bấm lệnh 1 lần duy nhất trong `tmux`, 3 mô hình sẽ tự 
 
 ```bash
 cd ~/breastcancer_segmentation
-git pull origin main
 tmux new -s sota_queue
 bash scripts/run_sota_queue.sh
 ```

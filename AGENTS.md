@@ -21,3 +21,6 @@ Khi thực hiện bất kỳ tác vụ lập trình, huấn luyện, đánh giá
 2. **Không giải phóng ổ đĩa / Không xóa dữ liệu**: Tuyệt đối không xóa bất kỳ file nào ngoài thư mục của project.
 3. **Giới hạn tài nguyên**: Luôn giới hạn `torch.set_num_threads(4)` và kiểm tra `nvidia-smi` trước khi chạy GPU.
 4. **Bảo toàn splits**: Tuyệt đối không sinh lại `splits_final.json`, luôn dùng cố định 785 train / 197 val.
+5. **CẤM DÙNG GIT TRÊN SERVER TRƯỜNG (`node1`)**: Máy chủ `node1` **hoàn toàn KHÔNG kết nối tài khoản GitHub**, không thể và không được phép chạy `git pull` hay `git clone`. Mọi file mã nguồn được đồng bộ trực tiếp qua SCP hoặc do người dùng tự tải vào server. Tuyệt đối cấm AI hướng dẫn chạy lệnh git trên máy trường.
+6. **CẤM DÙNG JUPYTER NOTEBOOK TRÊN SERVER TRƯỜNG**: Mọi tác vụ huấn luyện và đánh giá bắt buộc phải chạy qua terminal/script bash trong `tmux`, tuyệt đối không dùng file `.ipynb`.
+
