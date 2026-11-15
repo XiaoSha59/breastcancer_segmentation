@@ -146,7 +146,7 @@ def main():
 
             inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
 
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 outputs = sliding_window_inference(
                     inputs=inputs,
                     roi_size=tuple(args.patch_size),
@@ -172,7 +172,7 @@ def main():
             elif pred_sum == 0:
                 dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
             elif label_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
+                dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
             else:
                 dice = 2.0 * intersection / (pred_sum + label_sum)
                 iou = intersection / union

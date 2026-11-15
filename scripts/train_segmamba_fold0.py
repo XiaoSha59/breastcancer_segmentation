@@ -279,9 +279,12 @@ def main():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log_print(f"SegMamba initialized. Trainable parameters: {total_params / 1e6:.2f}M")
 
-    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
+    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True, include_background=False)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
-    scaler = GradScaler()
+    try:
+        scaler = torch.amp.GradScaler('cuda')
+    except Exception:
+        scaler = GradScaler()
 
     start_epoch = 0
     best_val_dice = 0.0
@@ -320,7 +323,7 @@ def main():
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 logits = model(images)
                 loss = loss_fn(logits, labels)
 
@@ -370,7 +373,7 @@ def main():
                     else:
                         val_img_pad = val_img
 
-                    with autocast():
+                    with torch.amp.autocast('cuda'):
                         val_out = sliding_window_inference(
                             inputs=val_img_pad,
                             roi_size=tuple(args.patch_size),
