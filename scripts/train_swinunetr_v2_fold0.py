@@ -260,11 +260,16 @@ def main():
         splits = json.load(f)
     train_ids = splits[args.fold]["train"]
     val_ids = splits[args.fold]["val"]
-    log_print(f"Loaded split fold {args.fold}: {len(train_ids)} train cases, {len(val_ids)} val cases.")
-
     train_sampler = FastNpyBatchSampler(args.prep_dir, train_ids, args.patch_size, oversample_foreground_percent=0.33)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Hardware stability on node1 RTX 4090: use native PyTorch CUDA kernels (same as MedNeXt)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.enabled = False
+    log_print("Hardware safety: cuDNN disabled (torch.backends.cudnn.enabled = False). Running 100% on native PyTorch CUDA kernels.")
 
     # SwinUNETR V2: use_v2=True and downsample="mergingv2"
     log_print("Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48)...")
