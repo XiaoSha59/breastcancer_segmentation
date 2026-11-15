@@ -106,19 +106,34 @@ class NativeFastMambaBlock(nn.Module):
 
 class MambaLayer(nn.Module):
     """
-    SegMamba Official Mamba Layer.
-    Flattens 3D volume into (B, L, C) token sequence, performs bidirectional state-space modeling,
-    and reshapes back to 3D volumetric feature representation.
+    SegMamba Official Mamba Layer (MICCAI 2024).
+    Directly faithful to: https://github.com/ge-xing/SegMamba/blob/main/model_segmamba/segmamba.py
+    Supports both author's custom bimamba_type="v3" kernel and standard mamba_ssm.
     """
-    def __init__(self, dim: int, d_state: int = 16, d_conv: int = 4, expand: int = 2):
+    def __init__(self, dim: int, d_state: int = 16, d_conv: int = 4, expand: int = 2, num_slices: int = None):
         super().__init__()
         self.dim = dim
         self.norm = nn.LayerNorm(dim)
         if HAS_MAMBA_SSM:
-            self.mamba = MambaSSM(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
+            try:
+                # Official author's customized fork with bimamba_type="v3"
+                self.mamba = MambaSSM(
+                    d_model=dim,
+                    d_state=d_state,
+                    d_conv=d_conv,
+                    expand=expand,
+                    bimamba_type="v3",
+                    nslices=num_slices,
+                )
+                self.has_bimamba = True
+            except TypeError:
+                # Upstream official mamba-ssm from Tri Dao & Albert Gu
+                self.mamba = MambaSSM(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
+                self.has_bimamba = False
             self.is_native = False
         else:
             self.mamba = NativeFastMambaBlock(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
+            self.has_bimamba = False
             self.is_native = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -132,13 +147,15 @@ class MambaLayer(nn.Module):
         x_flat = x.reshape(B, C, n_tokens).transpose(-1, -2)
         x_norm = self.norm(x_flat)
 
-        # Bidirectional scanning (Forward + Backward) to achieve omnidirectional 3D receptive field
-        out_fwd = self.mamba(x_norm)
-        out_bwd = torch.flip(self.mamba(torch.flip(x_norm, dims=[1])), dims=[1])
-        out_fused = (out_fwd + out_bwd) * 0.5
+        if getattr(self, "has_bimamba", False):
+            out_mamba = self.mamba(x_norm)
+        else:
+            out_fwd = self.mamba(x_norm)
+            out_bwd = torch.flip(self.mamba(torch.flip(x_norm, dims=[1])), dims=[1])
+            out_mamba = (out_fwd + out_bwd) * 0.5
 
         # Reshape back to (B, C, D, H, W)
-        out = out_fused.transpose(-1, -2).reshape(B, C, *img_dims)
+        out = out_mamba.transpose(-1, -2).reshape(B, C, *img_dims)
         return out + x_skip
 
 
