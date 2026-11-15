@@ -75,31 +75,31 @@ class NativeFastMambaBlock(nn.Module):
         x_conv = self.conv1d(x_proj.transpose(1, 2))[:, :, :L].transpose(1, 2)
         x_act = F.silu(x_conv)
 
-        # SSM parameter projections
-        ssm_params = self.x_proj(x_act)
+        # SSM parameter projections in float32 to prevent fp16 numerical underflow
+        ssm_params = self.x_proj(x_act.float())
         delta = ssm_params[..., :1]
         B_ssm = ssm_params[..., 1:1 + self.d_state]
         C_ssm = ssm_params[..., 1 + self.d_state:]
 
         delta = F.softplus(self.dt_proj(delta))
-        A = -torch.exp(self.A_log)  # (d_inner, d_state)
+        A = -torch.exp(self.A_log.float())  # (d_inner, d_state) in float32
 
-        # Discretization
+        # Discretization in float32 (matches official CUDA kernel behavior in SRAM)
         dA = torch.exp(delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(0))  # (B, L, d_inner, d_state)
         dB = delta.unsqueeze(-1) * B_ssm.unsqueeze(2)                     # (B, L, d_inner, d_state)
 
-        # Safe recurrent scan with detached chunking to avoid autograd graph explosion
-        # If L is large (e.g. 131k tokens), we scan in contiguous chunks
-        h = torch.zeros(B, self.d_inner, self.d_state, device=x.device, dtype=x.dtype)
+        # Recurrent scan accumulated in float32
+        h = torch.zeros(B, self.d_inner, self.d_state, device=x.device, dtype=torch.float32)
+        x_act_f = x_act.float()
         y_list = []
-        
-        # Vectorized step scan
+
         for t in range(L):
-            h = dA[:, t] * h + dB[:, t] * x_act[:, t].unsqueeze(-1)
+            h = dA[:, t] * h + dB[:, t] * x_act_f[:, t].unsqueeze(-1)
             y_t = torch.einsum("bns,bs->bn", h, C_ssm[:, t])
             y_list.append(y_t)
 
-        y = torch.stack(y_list, dim=1) + x_act * self.D
+        y = torch.stack(y_list, dim=1) + x_act_f * self.D.float()
+        y = y.to(x.dtype)
         out = self.out_proj(y * F.silu(z))
         return out
 
