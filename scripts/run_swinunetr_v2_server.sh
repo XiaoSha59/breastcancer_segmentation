@@ -108,12 +108,14 @@ if [ -f "$RESULTS_DIR/checkpoint_latest.pth" ]; then
     EXTRA_FLAGS="--resume"
 fi
 
+NUM_EPOCHS="${1:-200}"
+
 python3 -u "$SCRIPT_DIR/train_swinunetr_v2_fold0.py" \
     --prep_dir "$PLAN_DIR" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \
-    --epochs 200 \
+    --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
     --patch_size 96 96 96 \
@@ -122,7 +124,7 @@ python3 -u "$SCRIPT_DIR/train_swinunetr_v2_fold0.py" \
     $EXTRA_FLAGS &
 
 TRAIN_PID=$!
-echo "[$(date)] SwinUNETR V2 training started with PID $TRAIN_PID"
+echo "[$(date)] SwinUNETR V2 training started with PID $TRAIN_PID ($NUM_EPOCHS epochs)"
 
 # Wait for training to complete
 wait $TRAIN_PID
@@ -135,12 +137,16 @@ if [ $TRAIN_EXIT -ne 0 ]; then
 fi
 
 echo "=== STEP 4: SLIDING WINDOW EVALUATION ON 197 VALIDATION CASES ==="
-python3 -u "$SCRIPT_DIR/evaluate_swinunetr_v2_fold0.py" \
-    --prep_dir "$PLAN_DIR" \
-    --splits_file "$SPLITS_FILE" \
-    --output_dir "$RESULTS_DIR" \
-    --fold 0 \
-    --patch_size 96 96 96 \
+if [ "$NUM_EPOCHS" -ge 200 ]; then
+    python3 -u "$SCRIPT_DIR/evaluate_swinunetr_v2_fold0.py" \
+        --prep_dir "$PLAN_DIR" \
+        --splits_file "$SPLITS_FILE" \
+        --output_dir "$RESULTS_DIR" \
+        --fold 0 \
+        --patch_size 96 96 96
+else
+    echo "Notice: Running short smoke test ($NUM_EPOCHS epochs < 200). Skipping 50-minute full validation."
+fi \
     --feature_size 48 \
     --num_workers 4 || echo "Evaluation warning: Check validation logs"
 
