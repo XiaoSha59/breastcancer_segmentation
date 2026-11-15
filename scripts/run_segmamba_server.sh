@@ -108,22 +108,28 @@ if [ ! -f "$TRAIN_SCRIPT" ]; then
     exit 1
 fi
 
+NUM_EPOCHS="${1:-200}"
+VAL_INT="${2:-5}"
+if [ "$NUM_EPOCHS" -le 5 ]; then
+    VAL_INT=1
+fi
+
 python3 -u "$TRAIN_SCRIPT" \
     --prep_dir "$PLAN_DIR" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \
-    --epochs 200 \
+    --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
     --patch_size 64 128 128 \
     --initial_lr 1e-4 \
     --weight_decay 1e-5 \
-    --val_interval 5 \
+    --val_interval "$VAL_INT" \
     --resume &
 
 TRAIN_PID=$!
-echo "SegMamba training started with PID $TRAIN_PID on GPU $CUDA_VISIBLE_DEVICES."
+echo "SegMamba training started with PID $TRAIN_PID on GPU $CUDA_VISIBLE_DEVICES ($NUM_EPOCHS epochs, val interval $VAL_INT)."
 wait "$TRAIN_PID"
 unset TRAIN_PID
 
@@ -142,15 +148,20 @@ echo "Verified checkpoint: $CHECKPOINT_BEST ($(du -h "$CHECKPOINT_BEST" | cut -f
 
 echo "=== STEP 5: SLIDING WINDOW INFERENCE & OFFICIAL EVALUATION ==="
 EVAL_SCRIPT="$SCRIPT_DIR/evaluate_segmamba_fold0.py"
-if [ -f "$EVAL_SCRIPT" ]; then
-    python3 -u "$EVAL_SCRIPT" \
-        --prep_dir "$PLAN_DIR" \
-        --splits_file "$SPLITS_FILE" \
-        --output_dir "$RESULTS_DIR" \
-        --fold 0 \
-        --patch_size 64 128 128
+if [ "$NUM_EPOCHS" -ge 200 ]; then
+    if [ -f "$EVAL_SCRIPT" ]; then
+        python3 -u "$EVAL_SCRIPT" \
+            --prep_dir "$PLAN_DIR" \
+            --splits_file "$SPLITS_FILE" \
+            --output_dir "$RESULTS_DIR" \
+            --fold 0 \
+            --patch_size 64 128 128
+    else
+        echo "Warning: $EVAL_SCRIPT not found, skipping evaluation step."
+    fi
 else
-    echo "Warning: $EVAL_SCRIPT not found, skipping evaluation step."
+    echo "Notice: Running short smoke test ($NUM_EPOCHS epochs < 200). Skipping 50-minute full validation."
+    echo "To run full 200 epochs and evaluate, simply run: bash scripts/run_segmamba_server.sh (it will resume seamlessly)."
 fi
 
 echo "=============================================================================="
