@@ -24,7 +24,18 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+try:
+    from torch.amp import GradScaler as TorchGradScaler, autocast as torch_autocast
+    def get_autocast():
+        return torch_autocast("cuda")
+    def get_scaler():
+        return TorchGradScaler("cuda")
+except (ImportError, TypeError):
+    from torch.cuda.amp import GradScaler as TorchGradScaler, autocast as torch_autocast
+    def get_autocast():
+        return torch_autocast()
+    def get_scaler():
+        return TorchGradScaler()
 
 import monai
 from monai.networks.nets import SwinUNETR
@@ -45,6 +56,7 @@ def parse_args():
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
+    parser.add_argument("--use_checkpoint", action="store_true", default=False, help="Enable activation checkpointing (default False on 24GB RTX 4090 to avoid autograd kernel bugs)")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     return parser.parse_args()
 
@@ -272,12 +284,12 @@ def main():
     log_print("Hardware safety: cuDNN disabled (torch.backends.cudnn.enabled = False). Running 100% on native PyTorch CUDA kernels.")
 
     # SwinUNETR V2: use_v2=True and downsample="mergingv2"
-    log_print("Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48)...")
+    log_print(f"Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,
-        use_checkpoint=True,
+        use_checkpoint=args.use_checkpoint,
         spatial_dims=3,
         downsample="mergingv2",
         use_v2=True,
@@ -288,7 +300,7 @@ def main():
 
     loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
-    scaler = GradScaler()
+    scaler = get_scaler()
 
     start_epoch = 0
     best_val_dice = 0.0
@@ -324,11 +336,11 @@ def main():
         for it in range(args.iterations_per_epoch):
             images, labels = train_sampler.sample_batch(args.batch_size)
             images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            labels = torch.clamp(labels.to(device, non_blocking=True), 0, 1).long()
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast():
+            with get_autocast():
                 logits = model(images)
                 loss = loss_fn(logits, labels)
 
@@ -373,7 +385,7 @@ def main():
                         else:
                             continue
 
-                        with autocast():
+                        with get_autocast():
                             val_out = sliding_window_inference(
                                 inputs=val_img,
                                 roi_size=tuple(args.patch_size),
