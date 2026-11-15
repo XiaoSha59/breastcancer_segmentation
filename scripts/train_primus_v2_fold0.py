@@ -23,7 +23,18 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+try:
+    from torch.amp import GradScaler as TorchGradScaler, autocast as torch_autocast
+    def get_autocast():
+        return torch_autocast("cuda")
+    def get_scaler():
+        return TorchGradScaler("cuda")
+except (ImportError, TypeError):
+    from torch.cuda.amp import GradScaler as TorchGradScaler, autocast as torch_autocast
+    def get_autocast():
+        return torch_autocast()
+    def get_scaler():
+        return TorchGradScaler()
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from primus_v2 import create_primus_v2
@@ -317,10 +328,7 @@ def main():
 
     loss_fn = RobustDiceCELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
-    try:
-        scaler = torch.amp.GradScaler('cuda')
-    except Exception:
-        scaler = GradScaler()
+    scaler = get_scaler()
 
     start_epoch = 0
     best_val_dice = 0.0
@@ -354,11 +362,11 @@ def main():
         for it in range(args.iterations_per_epoch):
             inputs, labels = train_sampler.sample_batch(args.batch_size)
             inputs = inputs.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            labels = torch.clamp(labels.to(device, non_blocking=True), 0, 1).long()
 
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.amp.autocast('cuda'):
+            with get_autocast():
                 outputs = model(inputs)
                 loss = loss_fn(outputs, labels)
 
@@ -388,7 +396,11 @@ def main():
                             import blosc2
                             img_h = blosc2.open(b2nd_path)
                             seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
-                            val_img = torch.from_numpy(np.array(img_h[:], dtype=np.float32)).unsqueeze(0).to(device)
+                            n_chans = min(5, img_h.shape[0])
+                            val_arr = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
+                            for c in range(n_chans):
+                                val_arr[c] = img_h[c]
+                            val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
                             val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                         elif os.path.exists(npy_path):
                             case_data = np.load(npy_path, mmap_mode="r")
@@ -408,7 +420,7 @@ def main():
                         else:
                             val_img_padded = val_img
 
-                        with torch.amp.autocast('cuda'):
+                        with get_autocast():
                             val_out = sliding_window_inference(
                                 inputs=val_img_padded,
                                 roi_size=tuple(args.patch_size),

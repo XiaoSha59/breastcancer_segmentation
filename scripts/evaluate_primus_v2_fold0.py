@@ -123,9 +123,10 @@ def main():
             npy_path = os.path.join(prep_dir, f"{cid}.npy")
             if os.path.exists(b2nd_path):
                 import blosc2
-                img_h = blosc2.open(b2nd_path)
-                seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                img_raw = np.array(img_h[:], dtype=np.float32)
+                n_chans = min(5, img_h.shape[0])
+                img_raw = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
+                for c in range(n_chans):
+                    img_raw[c] = img_h[c]
                 lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
             elif os.path.exists(npy_path):
                 case_data = np.load(npy_path, mmap_mode="r")
