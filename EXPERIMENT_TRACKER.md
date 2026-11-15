@@ -35,22 +35,24 @@
 
 ---
 
-## 2. BA MÔ HÌNH CẦN HUẤN LUYỆN TRÊN SERVER TRƯỜNG (`node1`)
+## 2. PHÂN BỔ THỰC THI HYBRID (SERVER TRƯỜNG & GCP)
 
-Cả 3 mô hình đều chạy trên card đồ họa **NVIDIA RTX 4090 24GB**:
+Để tối ưu hóa phần cứng và rút ngắn thời gian làm đồ án từ 3 ngày xuống còn **1 ngày**, hai mô hình được phân bổ chạy song song:
 
 ```
-+---------------------------------------------------------------------------------------------------+
-| Model             | Loại kiến trúc              | VRAM ước tính | Tốc độ / Epoch | Tổng thời gian |
-+---------------------------------------------------------------------------------------------------+
-| 1. SegMamba 3D    | Pure 3D State Space Model   | ~10.8 - 11.2GB| ~5.0 - 5.5 min | ~19 tiếng      |
-| 2. SwinUNETR v2   | Vision Transformer (MONAI)  | ~13.0 - 13.5GB| ~6.5 - 7.5 min | ~24 tiếng      |
-| 3. PrimusV2-S     | EVA ViT + 3D Axial RoPE     | ~11.5 - 12.2GB| ~6.0 - 7.0 min | ~22 tiếng      |
-+---------------------------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------------------------------------+
+| Model            | Môi trường chạy | Phần cứng & Driver           | Cơ chế đặc thù       | Tự động tắt máy (Shutdown)   |
++----------------------------------------------------------------------------------------------------------------+
+| 1. SwinUNETR v2  | Server node1    | NVIDIA RTX 4090 24GB         | Native PyTorch CUDA  | KHÔNG TỰ TẮT (Cluster 24/7)  |
+| 2. SegMamba 3D   | Google Cloud VM | NVIDIA L4 24GB (CUDA Toolkit)| Flash-Scan mamba_ssm | TỰ ĐỘNG TẮT KHI XONG (Tiết kiệm)|
+| 3. PrimusV2-S    | Server node1    | NVIDIA RTX 4090 24GB         | ViT + 3D Axial RoPE  | Chạy sau khi SwinUNETR xong  |
++----------------------------------------------------------------------------------------------------------------+
 ```
 
-- **Ràng buộc phần cứng**: Vì mỗi mô hình chiếm từ 11GB đến 13.5GB VRAM, card 24GB **không thể chạy song song 2 mô hình cùng lúc**. Bắt buộc phải chạy **tuần tự (sequential)**.
-- **Tổng thời gian chạy 3 mô hình**: Khoảng 65 tiếng (~2.7 ngày).
+- **Lợi ích chiến lược**:
+  - **SwinUNETR v2** chạy trên server trường miễn phí, không vướng lỗi cuDNN nhờ cờ Native CUDA.
+  - **SegMamba 3D** chạy trên GCP có sẵn `nvcc` và `mamba-ssm`, VRAM chỉ tốn ~10.8 GB, chạy xong tự động `poweroff` tiết kiệm 100% ngân sách.
+  - **Cả 2 mô hình chạy song song**: Đến chiều Thứ Hai là có trọn vẹn kết quả của cả hai!
 
 ---
 
