@@ -13,7 +13,7 @@ Thư mục lưu trữ toàn bộ trọng số mô hình tốt nhất (`checkpoin
 | 3 | **MedNeXt-L k3** | Pure CNN (ConvNeXt Inverted) | **HOÀN TẤT** | 0.7347 | 0.7924 | 6.40 mm | `mednext_l_k3_fold0_checkpoint_best.pth` (414 MB) |
 | 4 | **Vanilla 3D U-Net** | Pure CNN (Plain Conv, No DS) | **HOÀN TẤT** | 0.7129 | 0.7668 | 9.43 mm | `vanilla_3dunet_fold0_checkpoint_best.pth` (240 MB) |
 | 5 | **U-Mamba Bot 3D** | Hybrid CNN + Mamba SSM | **HOÀN TẤT** | 0.7481 | 0.8040 | 6.32 mm | `umamba_fold0_checkpoint_best.pth` (337 MB) |
-| 6 | **SwinUNETR v1** | Shifted Window ViT | **HOÀN TẤT** | **0.7906** | **0.7950** | -- | `swinunetr_fold0_checkpoint_best.pth` (754 MB) |
+| 6 | **SwinUNETR v1** | Shifted Window ViT | **HOÀN TẤT** | **0.7250 ± 0.1837** | **0.7777** | **13.60 mm** | `swinunetr_fold0_checkpoint_best.pth` (754 MB) |
 | 7 | **SwinUNETR v2** | ResConv + Swin ViT v2 | **ĐANG CHẠY (node1)** | *(Đạt 0.6140 tại Ep 39)* | -- | -- | `swinunetr_v2_fold0_checkpoint_best.pth` (880 MB) |
 | 8 | **SegMamba 3D** | Tri-orientated 3D Mamba | **ĐANG CHẠY (GCP L4)** | *(Đạt 0.4162 tại Ep 4)* | -- | -- | GCP VM `cancer-seg-gpu` (BFloat16) |
 | 9 | **PrimusV2-S** | Pure ViT + 3D Axial RoPE | **SẴN SÀNG (node1)** | -- | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
