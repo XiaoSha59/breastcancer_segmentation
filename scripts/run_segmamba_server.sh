@@ -24,19 +24,12 @@ export VECLIB_MAXIMUM_THREADS=4
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-# Auto-activate breast_env if current shell is in base or system python
-if [ "$CONDA_DEFAULT_ENV" != "breast_env" ]; then
-    if command -v conda &>/dev/null; then
-        eval "$(conda shell.bash hook 2>/dev/null)"
-        conda activate breast_env 2>/dev/null || true
-    fi
-    if ! python3 -c "import torch, numpy" &>/dev/null; then
-        for act in "$HOME/breast_env/bin/activate" "$HOME/miniconda3/bin/activate" "$HOME/anaconda3/bin/activate"; do
-            if [ -f "$act" ]; then
-                source "$act" breast_env 2>/dev/null || true
-                break
-            fi
-        done
+# Auto-activate python venv breast_env if current shell is in system python
+if ! python3 -c "import torch, numpy" &>/dev/null; then
+    if [ -f "$HOME/breast_env/bin/activate" ]; then
+        source "$HOME/breast_env/bin/activate"
+    elif [ -f "$PROJECT_DIR/breast_env/bin/activate" ]; then
+        source "$PROJECT_DIR/breast_env/bin/activate"
     fi
 fi
 

@@ -8,7 +8,12 @@
 ## ⛔ QUY TẮC BẤT DI BẤT DỊCH VỀ MẠNG TRÊN SERVER TRƯỜNG (`node1`)
 - **SERVER TRƯỜNG KHÔNG KẾT NỐI GITHUB**: Máy chủ `node1` không có tài khoản/khóa kết nối GitHub, **TUYỆT ĐỐI CẤM dùng lệnh `git pull` hoặc `git clone` trên server trường**.
 - **Cơ chế cập nhật mã nguồn**: Mọi cập nhật code từ máy cá nhân lên server trường được đưa qua đường SCP trung chuyển (hoặc user tự copy vào thư mục). Các file code mới nhất hiện **ĐÃ ĐƯỢC CẬP NHẬT TRỰC TIẾP VÀO SERVER TRƯỜNG**.
-- **Khi chạy chỉ cần vào thư mục và gọi script trực tiếp trong `tmux`**, không gõ bất kỳ lệnh git nào.
+- **MÔI TRƯỜNG ẢO LÀ PYTHON VENV (`breast_env`) - KHÔNG DÙNG CONDA**: Trước khi chạy script, luôn kích hoạt bằng:
+  ```bash
+  source ~/breast_env/bin/activate
+  ```
+- **Khi chạy chỉ cần vào thư mục và gọi script trực tiếp trong `tmux`**, không gõ bất kỳ lệnh git hay conda nào.
+
 
 ---
 

@@ -102,15 +102,15 @@ Tài liệu này tổng hợp toàn bộ các **nguyên tắc bắt buộc từ 
     tail -f results/.../train.log  # Theo dõi trực tiếp theo thời gian thực (Ctrl+C để thoát)
     ```
 
-### 6. 🔒 DÙNG MÔI TRƯỜNG RIÊNG (`Conda / venv`), KHÔNG ĐỤNG PYTHON GỐC
-* **Lý do:**
-  * Cài đè thư viện vào Python hệ thống (`sudo pip install`) có thể phá hỏng môi trường của các thành viên khác trong lab.
-* **Quy tắc:**
-  * Luôn tạo hoặc kích hoạt môi trường conda riêng:
-    ```bash
-    conda activate breast_seg
-    # Hoặc tạo mới: conda create -n breast_seg python=3.10 -y
-    ```
+### 6. 🔒 MÔI TRƯỜNG ẢO PYTHON VENV (`breast_env`), TUYỆT ĐỐI KHÔNG DÙNG CONDA
+* **Thực tế hạ tầng:**
+  * Toàn bộ thư viện của dự án được cài đặt trong môi trường ảo **Python `venv`** có tên là **`breast_env`**, dự án **KHÔNG SỬ DỤNG CONDA**.
+* **Lệnh kích hoạt chuẩn**:
+  ```bash
+  source ~/breast_env/bin/activate
+  ```
+  *(Khi thấy đầu dòng terminal xuất hiện `(breast_env)` là đã nạp đầy đủ PyTorch, CUDA, MONAI và các thư viện cần thiết).*
+
 
 ### 7. ⚠️ TUYỆT ĐỐI KHÔNG CAN THIỆP TẮT MÁY / REBOOT SERVER
 * **Lý do:**
