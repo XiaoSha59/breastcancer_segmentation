@@ -27,9 +27,9 @@
 | 4 | **U-Mamba Bot 3D** | `bowang-lab/U-Mamba` (MICCAI 2024) | **HOÀN TẤT** | 0.7481 | 0.8040 | `checkpoints/umamba_fold0_checkpoint_best.pth` |
 | 5 | **SwinUNETR v1** | `MONAI (SwinTransformer)` | **HOÀN TẤT** | 0.6652 | 0.7104 | `checkpoints/swinunetr_fold0_checkpoint_best.pth` |
 | 6 | **MedNeXt-L k3** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | 0.7347 | 0.7924 | `results/.../MedNeXt_L_k3_200epochs/fold_0/`<br>`checkpoints/mednext_l_k3_fold0_checkpoint_best.pth` |
-| 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **CHƯA CHẠY** | -- | -- | Script: `scripts/run_segmamba_server.sh` |
-| 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **CHƯA CHẠY** | -- | -- | Script: `scripts/run_swinunetr_v2_server.sh` |
-| 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **CHƯA CHẠY** | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
+| 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **SẴN SÀNG (GCP L4)** | -- | -- | Script: `scripts/run_segmamba_gcp.sh` |
+| 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | -- | -- | Đang chạy trong tmux `swin_v2` trên node1 |
+| 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **CHỜ CHẠY TIẾP** | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
 
 > *Ghi chú*: Toàn bộ 6 mô hình đã hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\`).
 
