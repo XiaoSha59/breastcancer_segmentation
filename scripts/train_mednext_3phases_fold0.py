@@ -354,10 +354,15 @@ def main():
             with torch.amp.autocast('cuda'):
                 logits = model(images)
                 if isinstance(logits, list):
-                    weights = [0.5, 0.25, 0.125, 0.0625, 0.0625]
+                    weights = [1.0 / (2 ** i) for i in range(len(logits))]
+                    weights = [w / sum(weights) for w in weights]
                     loss = 0.0
                     for l, w in zip(logits, weights):
-                        loss = loss + w * loss_fn(l, labels)
+                        if l.shape[2:] != labels.shape[2:]:
+                            down_labels = torch.nn.functional.interpolate(labels.float(), size=l.shape[2:], mode="nearest").long()
+                        else:
+                            down_labels = labels
+                        loss = loss + w * loss_fn(l, down_labels)
                 else:
                     loss = loss_fn(logits, labels)
 
