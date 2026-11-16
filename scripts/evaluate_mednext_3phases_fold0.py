@@ -109,7 +109,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.enabled = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True

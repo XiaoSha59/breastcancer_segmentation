@@ -245,10 +245,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
         log_print(f"Device: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.enabled = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        log_print("cuDNN disabled for safety on node1. Running 100% on rock-solid native PyTorch CUDA kernels.")
 
     # Auto-resolve splits_file
     if not os.path.exists(args.splits_file):
