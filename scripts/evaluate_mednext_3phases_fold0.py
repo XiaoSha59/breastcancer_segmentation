@@ -146,7 +146,16 @@ def main():
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
             try:
-                if has_prep:
+                if has_raw:
+                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(3)]
+                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                    for c in range(3):
+                        mask = img_raw[c] != 0
+                        if np.any(mask):
+                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
+                elif has_prep:
                     b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
                     npy_path = os.path.join(prep_dir, f"{cid}.npy")
                     if os.path.exists(b2nd_path):
@@ -165,15 +174,6 @@ def main():
                     else:
                         print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
                         continue
-                elif has_raw:
-                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(3)]
-                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
-                    for c in range(3):
-                        mask = img_raw[c] != 0
-                        if np.any(mask):
-                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
-                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
                 else:
                     print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                     continue
