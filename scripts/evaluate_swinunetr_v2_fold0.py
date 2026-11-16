@@ -95,9 +95,9 @@ def main():
     has_prep = prep_dir and os.path.isdir(prep_dir)
     has_raw = os.path.exists(images_dir) and len(os.listdir(images_dir)) > 0
 
-    print(f"Data Source: {'Preprocessed nnUNetPlans_3d_fullres (.b2nd/.npy) [OPTIMAL]' if has_prep else 'Raw NIfTI'}")
-    if has_prep:
-        print(f"Preprocessed Directory: {prep_dir}")
+    print(f"Data Source: {'Raw NIfTI (SimpleITK) [STANDARD - IDENTICAL TO MEDNEXT]' if has_raw else 'Preprocessed nnUNetPlans_3d_fullres'}")
+    if has_raw:
+        print(f"Raw Images Directory: {images_dir}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -131,7 +131,16 @@ def main():
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
             try:
-                if has_prep:
+                if has_raw:
+                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
+                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                    for c in range(5):
+                        mask = img_raw[c] != 0
+                        if np.any(mask):
+                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
+                elif has_prep:
                     b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
                     npy_path = os.path.join(prep_dir, f"{cid}.npy")
                     if os.path.exists(b2nd_path):
@@ -162,15 +171,6 @@ def main():
                     else:
                         print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
                         continue
-                elif has_raw:
-                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
-                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
-                    for c in range(5):
-                        mask = img_raw[c] != 0
-                        if np.any(mask):
-                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
-                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
                 else:
                     print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                     continue
