@@ -73,13 +73,15 @@ def main():
     print(f"Loaded {len(val_ids)} validation cases for Fold {args.fold}.")
 
     # Resolve preprocessed data directory
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.prep_dir and os.path.isdir(args.prep_dir):
         prep_dir = args.prep_dir
     else:
         candidate_dirs = [
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
             os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
             "/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres",
-            "/home/XiaoSha/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres",
             os.path.join(args.data_dir, "nnUNetPlans_3d_fullres"),
         ]
         prep_dir = ""
@@ -99,15 +101,13 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.enabled = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,
-        use_checkpoint=True,
+        use_checkpoint=False,
         spatial_dims=3,
         downsample="mergingv2",
         use_v2=True,
@@ -130,141 +130,161 @@ def main():
 
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
-            if has_prep:
-                b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
-                npy_path = os.path.join(prep_dir, f"{cid}.npy")
-                if os.path.exists(b2nd_path):
-                    import blosc2
-                    img_h = blosc2.open(b2nd_path)
-                    seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                    img_raw = np.array(img_h[:], dtype=np.float32)
-                    lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
-                elif os.path.exists(npy_path):
-                    case_data = np.load(npy_path, mmap_mode="r")
-                    img_raw = case_data[:5].astype(np.float32)
-                    lbl_raw = (case_data[5] > 0).astype(np.uint8)
+            try:
+                if has_prep:
+                    b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
+                    npy_path = os.path.join(prep_dir, f"{cid}.npy")
+                    if os.path.exists(b2nd_path):
+                        import blosc2
+                        img_h = blosc2.open(b2nd_path)
+                        seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
+                        n_chans = min(5, img_h.shape[0])
+                        val_arr = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
+                        for c in range(n_chans):
+                            val_arr[c] = img_h[c]
+                        img_raw = val_arr
+                        lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    elif os.path.exists(npy_path):
+                        case_data = np.load(npy_path, mmap_mode="r")
+                        img_raw = case_data[:5].astype(np.float32)
+                        lbl_raw = (case_data[5] > 0).astype(np.uint8)
+                    else:
+                        print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
+                        continue
+                elif has_raw:
+                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
+                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                    for c in range(5):
+                        mask = img_raw[c] != 0
+                        if np.any(mask):
+                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
                 else:
-                    print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
+                    print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                     continue
-            elif has_raw:
-                imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
-                lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
-                for c in range(5):
-                    mask = img_raw[c] != 0
-                    if np.any(mask):
-                        img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
-                lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
-            else:
-                print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
+
+                # Original dimensions: C, D, H, W
+                _, orig_d, orig_h, orig_w = img_raw.shape
+
+                # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
+                pad_d = max(0, pz - orig_d)
+                pad_h = max(0, py - orig_h)
+                pad_w = max(0, px - orig_w)
+
+                if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                    img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
+                else:
+                    img_padded = img_raw
+
+                inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device).contiguous()
+
+                try:
+                    with torch.amp.autocast('cuda'):
+                        outputs = sliding_window_inference(
+                            inputs=inputs,
+                            roi_size=tuple(args.patch_size),
+                            sw_batch_size=2,
+                            predictor=model,
+                            overlap=0.5,
+                        )
+                except RuntimeError as re:
+                    if "cuDNN" in str(re) or "CUDNN" in str(re):
+                        torch.backends.cudnn.enabled = False
+                        outputs = sliding_window_inference(
+                            inputs=inputs,
+                            roi_size=tuple(args.patch_size),
+                            sw_batch_size=2,
+                            predictor=model,
+                            overlap=0.5,
+                        )
+                    else:
+                        raise re
+
+                prob = torch.softmax(outputs, dim=1)[:, 1:2]
+                pred = (prob > 0.5).float()
+
+                # Safely extract 3D prediction and crop back to original shape
+                pred_3d = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
+                label_3d = lbl_raw[:orig_d, :orig_h, :orig_w]
+
+                # Metric computations
+                intersection = np.logical_and(pred_3d, label_3d).sum()
+                union = np.logical_or(pred_3d, label_3d).sum()
+                pred_sum = pred_3d.sum()
+                label_sum = label_3d.sum()
+
+                if label_sum == 0 and pred_sum == 0:
+                    dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
+                elif pred_sum == 0:
+                    dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
+                elif label_sum == 0:
+                    dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
+                else:
+                    dice = 2.0 * intersection / (pred_sum + label_sum)
+                    iou = intersection / union
+                    rec = intersection / label_sum
+                    prec = intersection / pred_sum
+
+                dice_scores.append(dice)
+                iou_scores.append(iou)
+                recall_scores.append(rec)
+                precision_scores.append(prec)
+
+                patient_metrics[cid] = {
+                    "Dice": float(dice),
+                    "IoU": float(iou),
+                    "Recall": float(rec),
+                    "Precision": float(prec),
+                }
+
+                # Physical geometry recovery from metadata (.pkl) or raw image
+                spacing = (1.0, 1.0, 1.0)
+                origin = (0.0, 0.0, 0.0)
+                direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+                if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
+                    ref_img = sitk.ReadImage(os.path.join(labels_dir, f"{cid}.nii.gz"))
+                    spacing = ref_img.GetSpacing()
+                    origin = ref_img.GetOrigin()
+                    direction = ref_img.GetDirection()
+                elif has_prep:
+                    pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
+                    if os.path.exists(pkl_path):
+                        try:
+                            with open(pkl_path, "rb") as pf:
+                                meta = pickle.load(pf)
+                            raw_sp = meta.get("spacing", [1.0, 1.0, 1.0])
+                            spacing = (float(raw_sp[2]), float(raw_sp[1]), float(raw_sp[0]))
+                        except Exception:
+                            pass
+
+                pred_img = sitk.GetImageFromArray(pred_3d)
+                pred_img.SetSpacing(spacing)
+                pred_img.SetOrigin(origin)
+                pred_img.SetDirection(direction)
+                sitk.WriteImage(pred_img, os.path.join(val_out_dir, f"{cid}.nii.gz"))
+
+                # Also export ground truth mask to validation/gt_masks/ for HD95 / ASSD calculation
+                gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
+                os.makedirs(gt_dir_for_eval, exist_ok=True)
+                gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
+                if not os.path.exists(gt_nii_path):
+                    gt_img = sitk.GetImageFromArray(label_3d)
+                    gt_img.SetSpacing(spacing)
+                    gt_img.SetOrigin(origin)
+                    gt_img.SetDirection(direction)
+                    sitk.WriteImage(gt_img, gt_nii_path)
+
+                del inputs, outputs, prob, pred
+                if (i + 1) % 10 == 0:
+                    torch.cuda.empty_cache()
+
+                if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
+                    print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
+            except Exception as ce:
+                print(f"Warning: Failed to evaluate case {cid}: {ce}. Skipping.")
                 continue
-
-            # Original dimensions: C, D, H, W
-            _, orig_d, orig_h, orig_w = img_raw.shape
-
-            # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
-            pad_d = max(0, pz - orig_d)
-            pad_h = max(0, py - orig_h)
-            pad_w = max(0, px - orig_w)
-
-            if pad_d > 0 or pad_h > 0 or pad_w > 0:
-                img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
-            else:
-                img_padded = img_raw
-
-            inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
-
-            with autocast():
-                outputs = sliding_window_inference(
-                    inputs=inputs,
-                    roi_size=tuple(args.patch_size),
-                    sw_batch_size=2,
-                    predictor=model,
-                    overlap=0.5,
-                    mode="gaussian",
-                )
-
-            prob = torch.softmax(outputs, dim=1)[:, 1:2]
-            pred = (prob > 0.5).float()
-
-            # Safely extract 3D prediction and crop back to original shape
-            pred_3d = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
-            label_3d = lbl_raw[:orig_d, :orig_h, :orig_w]
-
-            # Metric computations
-            intersection = np.logical_and(pred_3d, label_3d).sum()
-            union = np.logical_or(pred_3d, label_3d).sum()
-            pred_sum = pred_3d.sum()
-            label_sum = label_3d.sum()
-
-            if label_sum == 0 and pred_sum == 0:
-                dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
-            elif pred_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
-            elif label_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
-            else:
-                dice = 2.0 * intersection / (pred_sum + label_sum)
-                iou = intersection / union
-                rec = intersection / label_sum
-                prec = intersection / pred_sum
-
-            dice_scores.append(dice)
-            iou_scores.append(iou)
-            recall_scores.append(rec)
-            precision_scores.append(prec)
-
-            patient_metrics[cid] = {
-                "Dice": float(dice),
-                "IoU": float(iou),
-                "Recall": float(rec),
-                "Precision": float(prec),
-            }
-
-            # Physical geometry recovery from metadata (.pkl) or raw image
-            spacing = (1.0, 1.0, 1.0)
-            origin = (0.0, 0.0, 0.0)
-            direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-
-            if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
-                ref_img = sitk.ReadImage(os.path.join(labels_dir, f"{cid}.nii.gz"))
-                spacing = ref_img.GetSpacing()
-                origin = ref_img.GetOrigin()
-                direction = ref_img.GetDirection()
-            elif has_prep:
-                pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
-                if os.path.exists(pkl_path):
-                    try:
-                        with open(pkl_path, "rb") as pf:
-                            meta = pickle.load(pf)
-                        raw_sp = meta.get("spacing", [1.0, 1.0, 1.0])
-                        spacing = (float(raw_sp[2]), float(raw_sp[1]), float(raw_sp[0]))
-                    except Exception:
-                        pass
-
-            pred_img = sitk.GetImageFromArray(pred_3d)
-            pred_img.SetSpacing(spacing)
-            pred_img.SetOrigin(origin)
-            pred_img.SetDirection(direction)
-            sitk.WriteImage(pred_img, os.path.join(val_out_dir, f"{cid}.nii.gz"))
-
-            # Also export ground truth mask to validation/gt_masks/ for HD95 / ASSD calculation
-            gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
-            os.makedirs(gt_dir_for_eval, exist_ok=True)
-            gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
-            if not os.path.exists(gt_nii_path):
-                gt_img = sitk.GetImageFromArray(label_3d)
-                gt_img.SetSpacing(spacing)
-                gt_img.SetOrigin(origin)
-                gt_img.SetDirection(direction)
-                sitk.WriteImage(gt_img, gt_nii_path)
-
-            del inputs, outputs, prob, pred
-            if (i + 1) % 10 == 0:
-                torch.cuda.empty_cache()
-
-            if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
-                print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
 
     eval_duration = time.time() - eval_start
     mean_dice = float(np.mean(dice_scores))
