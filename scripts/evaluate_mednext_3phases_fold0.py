@@ -150,9 +150,19 @@ def main():
                         seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
                         val_buf = np.empty((3, *img_h.shape[1:]), dtype=np.float32)
                         for c in range(3):
-                            val_buf[c] = img_h[c]
+                            try:
+                                val_buf[c] = img_h[c]
+                            except Exception:
+                                for z in range(img_h.shape[1]):
+                                    val_buf[c, z] = img_h[c, z]
                         img_raw = val_buf
-                        lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                        try:
+                            lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                        except Exception:
+                            lbl_buf = np.empty(seg_h.shape[1:], dtype=np.int16)
+                            for z in range(seg_h.shape[1]):
+                                lbl_buf[z] = seg_h[0, z]
+                            lbl_raw = (lbl_buf > 0).astype(np.uint8)
                     elif os.path.exists(npy_path):
                         case_data = np.load(npy_path, mmap_mode="r")
                         img_raw = case_data[:3].astype(np.float32)
