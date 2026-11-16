@@ -191,4 +191,29 @@ $$\text{Vanilla 3D U-Net (0.7129)} \xrightarrow{+\text{Deep Supervision}} \text{
 * **Quy tắc tuyệt đối:** Không tự động kích hoạt `sudo shutdown` / `sudo poweroff` trên máy chủ dùng chung (toàn bộ code runner đã được gỡ sạch các lệnh này).
 * **Quản lý tiến trình ngầm:** Bắt buộc sử dụng `tmux` (`tmux new -s train_job`) để tránh tiến trình bị ngắt tín hiệu `SIGHUP` khi đóng trình duyệt hoặc ngắt kết nối SSH.
 
+---
+
+### 9.4. ⚠️ Bài Học Xương Máu Về Đánh Giá (Evaluation I/O: SimpleITK vs Blosc2 Buffer Error)
+
+Trong giai đoạn kiểm thử mô hình (Inference trên 197 ca Validation):
+
+#### 1. Hiện Tượng & Cạm Bẫy Kỹ Thuật (Sự Cố Ca Ngoại Cỡ `ISPY2-987995`):
+* Trong tập dữ liệu, một số bệnh nhân có thể tích ma trận 3D ngoại cỡ (ví dụ ca `ISPY2-987995` có **160 lát cắt Z** với ma trận $512 \times 512$).
+* Khi đọc từ file nén tốc độ cao Blosc2 (`.b2nd`), lệnh đọc nguyên khối 3D theo kênh `val_arr[c] = img_h[c]` yêu cầu bộ giải nén C-Blosc2 cấp phát một vùng đệm đơn liên tục hơn **168 MB**. 
+* Do cơ chế quản lý bộ đệm nội bộ của thư viện C-Blosc2 bị phân mảnh (buffer fragmentation), nó sẽ văng ngoại lệ:
+  ```text
+  RuntimeError: Error while getting the buffer
+  ```
+  Nếu không được xử lý chuẩn mực, ca bệnh này sẽ bị bỏ sót (skip), vi phạm tính toàn vẹn 197/197 ca của bài báo/luận văn.
+
+#### 2. Tại Sao Các Mô Hình Khác (MedNeXt, nnU-Net, U-Mamba) Không Bị?
+* **MedNeXt-L k3 và U-Mamba Bot 3D** trong file script đánh giá đã ưu tiên đọc trực tiếp từ thư mục ảnh gốc `imagesTr` bằng **SimpleITK** (`sitk.ReadImage`). SimpleITK giải nén file `.nii.gz` dạng luồng stream liên tục (stream decompression) nên xử lý trơn tru mọi kích thước thể tích mà không bị giới hạn bộ đệm chunk của Blosc2.
+* **Standard nnU-Net và ResEnc-L** sử dụng cơ chế nạp dữ liệu chuẩn của `nnUNetv2_predict` (Memory-mapped Virtual Memory Paging của Linux kernel), hoàn toàn không phụ thuộc thư viện Python Blosc2.
+* **SwinUNETR v2** ban đầu bị lỗi là do script cố tình đảo ưu tiên đọc file `.b2nd` lên trước file gốc `.nii.gz` nhằm tối ưu tốc độ đọc đĩa.
+
+#### 3. Quy Chuẩn Đồng Nhất Bắt Buộc Cho Mọi Script Đánh Giá:
+* **Quy tắc vàng 1:** Mọi script kiểm thử (`evaluate_*.py`) **bắt buộc phải ưu tiên nhánh đọc ảnh gốc NIfTI (`if has_raw:`) bằng SimpleITK lên hàng đầu**. Việc này vừa miễn nhiễm 100% với lỗi bộ đệm Blosc2, vừa giữ nguyên ma trận toạ độ (Spacing, Origin, Direction) chuẩn giải phẫu để tính toán **HD95** và **ASSD** chính xác tuyệt đối.
+* **Quy tắc vàng 2 (Phòng vệ chiều sâu):** Nếu bắt buộc phải nạp từ cache `.b2nd` (khi môi trường không có file `.nii.gz` thô), hàm đọc bắt buộc phải có cơ chế fallback giải nén từng lát Z (`img_h[c, z]`) để bộ đệm mỗi lần chỉ tốn 1 MB, tuyệt đối không được đọc nguyên khối một lần trên các ca ngoại cỡ.
+
+
 

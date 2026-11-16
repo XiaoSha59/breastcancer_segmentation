@@ -129,3 +129,18 @@ Cụ thể qua phân tích định lượng hiệu năng (profiling):
 2. Thêm bảo vệ `torch.clamp(labels, 0, 1).long()` trước khi đưa vào hàm loss để đảm bảo nhãn lớp tuyệt đối nằm trong khoảng [0, 1].
 3. Chuyển đổi sang `torch.amp.autocast('cuda')` và `torch.amp.GradScaler('cuda')` chuẩn của PyTorch 2.x để loại bỏ các cảnh báo deprecated.
 4. Checkpoint Epoch 20 đã được lưu an toàn tại `checkpoint_latest.pth`, lệnh `--resume` sẽ tiếp tục chạy từ Epoch 21 mà không bị mất dữ liệu đã học.
+
+---
+
+## 7. BÀI HỌC KẾT LUẬN: ĐỒNG NHẤT 100% QUY CHUẨN ĐÁNH GIÁ (EVALUATION I/O VIA SIMPLEITK)
+
+### 7.1 Tại sao giải pháp giải nén từng pha (channel-by-channel) vẫn gặp khó ở ca `ISPY2-987995`?
+* Trong giai đoạn đánh giá toàn diện (Inference trên 197 ca Validation), ca bệnh `ISPY2-987995` có kích thước dị thường: **160 lát cắt Z** (kích thước $160 \times 512 \times 512$).
+* Ngay cả khi giải nén riêng 1 pha: $160 \times 512 \times 512 \times 4 \text{ bytes} \approx 168 \text{ MB}$. Vùng đệm 168 MB này vẫn vượt quá bộ đệm giải nén khối liên tục trong thư viện C-Blosc2 trên Linux, tiếp tục gây ra lỗi `Error while getting the buffer`.
+
+### 7.2 Cơ chế đồng nhất chuẩn hoá (Standardized Resolution)
+1. **Ưu tiên số 1 (`has_raw`):** Đọc trực tiếp từ file ảnh gốc `.nii.gz` qua **SimpleITK** (`sitk.ReadImage`). 
+   - SimpleITK giải nén luồng tuần tự (stream decompression) chuẩn y tế, xử lý trôi chảy bất kỳ thể tích nào mà không bị giới hạn bộ đệm C-Blosc2.
+   - Giúp toàn bộ các mô hình (**MedNeXt, SwinUNETR, U-Mamba, nnU-Net**) có chung một cơ chế nạp dữ liệu thống nhất 100%, bảo toàn ma trận toạ độ gốc (Spacing, Origin) để tính HD95 và ASSD chính xác tuyệt đối.
+2. **Cơ chế dự phòng chiều sâu (`has_prep`):** Nếu buộc phải đọc từ file `.b2nd`, hàm đọc tự động chuyển sang giải nén từng lát cắt Z (`img_h[c, z]`). Mỗi lát 2D chỉ tốn 1 MB, loại bỏ vĩnh viễn nguy cơ tràn bộ đệm Blosc2.
+
