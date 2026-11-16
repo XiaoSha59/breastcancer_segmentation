@@ -31,6 +31,12 @@ import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast, GradScaler
 
+# HARDWARE COMPATIBILITY: Disable cuDNN globally on node1 to prevent CUDNN_STATUS_NOT_INITIALIZED
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 # Ensure mednext is importable
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
