@@ -349,12 +349,9 @@ def main():
 
             running_loss += loss.item()
 
-            if (it + 1) % 50 == 0 or it == args.iterations_per_epoch - 1:
-                log_print(f"Epoch {epoch:03d}/{args.epochs:03d} | Iter {it+1:03d}/{args.iterations_per_epoch} | Loss: {running_loss/(it+1):.4f} | LR: {current_lr:.6f}")
-
         epoch_loss = running_loss / args.iterations_per_epoch
         epoch_duration = time.time() - epoch_start
-        log_print(f"Epoch {epoch:03d} Completed in {epoch_duration:.1f}s | Train Loss: {epoch_loss:.4f} | LR: {current_lr:.6f}")
+        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} Completed in {epoch_duration:.1f}s | Train Loss: {epoch_loss:.4f} | LR: {current_lr:.6f}")
 
         # Validation every val_interval epochs or last epoch
         mean_val_dice = 0.0
