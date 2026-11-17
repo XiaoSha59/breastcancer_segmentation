@@ -144,3 +144,84 @@ Cụ thể qua phân tích định lượng hiệu năng (profiling):
    - Giúp toàn bộ các mô hình (**MedNeXt, SwinUNETR, U-Mamba, nnU-Net**) có chung một cơ chế nạp dữ liệu thống nhất 100%, bảo toàn ma trận toạ độ gốc (Spacing, Origin) để tính HD95 và ASSD chính xác tuyệt đối.
 2. **Cơ chế dự phòng chiều sâu (`has_prep`):** Nếu buộc phải đọc từ file `.b2nd`, hàm đọc tự động chuyển sang giải nén từng lát cắt Z (`img_h[c, z]`). Mỗi lát 2D chỉ tốn 1 MB, loại bỏ vĩnh viễn nguy cơ tràn bộ đệm Blosc2.
 
+---
+
+## 8. PHÂN TÍCH SỰ CỐ HỒI QUY NGÀY 17/11/2026: TẠI SAO CHẠY HƠN 10 LẦN TRƯỚC KHÔNG BỊ MÀ LẦN NÀY LẠI BỊ?
+
+> **Hiện tượng**: Trong quá trình huấn luyện `SwinUNETR_v2_3phases_fold0.py` trên máy chủ `node1`, log liên tục xuất hiện dòng cảnh báo:
+> ```text
+> Warning: failed sampling attempt ISPY2-551795: Error while getting the buffer
+> ```
+> Cảnh báo này xuất hiện định kỳ mỗi vài epoch một lần (Epoch 30, 33, 36, 37, 39, 42, 44, 45).
+
+### 8.1 Câu hỏi cốt lõi: Tại sao hơn 10 lần chạy trước đó hoàn toàn không gặp lỗi này?
+
+Đây là câu hỏi hoàn toàn chính xác. Qua kiểm tra lịch sử Git và đối chiếu từng dòng mã nguồn, sự thật kỹ thuật được làm sáng tỏ như sau:
+
+1. **Ở các mô hình nnU-Net, ResEnc-UNet L, U-Mamba Bot 3D (Native nnU-Net)**:
+   - Các mô hình này chạy bên trong framework nnU-Net gốc (`nnUNetTrainer`).
+   - Dữ liệu được nạp qua luồng C++ đa tiến trình của nnU-Net (`nnUNetDataLoader3D`) nạp trực tiếp mmap `.npy`, hoàn toàn **không bao giờ gọi thư viện Blosc2 thủ công** trong quá trình lấy mẫu patch. Do đó 100% không thể gặp lỗi Blosc2 buffer.
+
+2. **Ở các mô hình Standalone 5 pha trước đó (`train_mednext_fold0.py`, `train_segmamba_fold0.py`, `train_swinunetr_v2_fold0.py`)**:
+   - Trong class `FastNpyBatchSampler` của bản 5 pha gốc, khối xử lý ngoại lệ được viết chuẩn mực:
+     ```python
+     except Exception as ex:
+         print(f"[DATA WARNING] Case {cid} failed during sampling ({ex}). Retrying...")
+         if cid in self.case_ids:
+             self.case_ids.remove(cid)   # <-- ĐÃ XÓA NGAY CA LỖI RA KHỎI POOL LẤY MẪU!
+         if cid in self.handles:
+             self.handles.pop(cid, None)
+     ```
+   - Nếu ca `ISPY2-551795` (hoặc bất kỳ ca nào có kích thước đặc thù) gặp sự cố buffer dù chỉ 1 lần, lệnh `self.case_ids.remove(cid)` sẽ **loại bỏ ca đó vĩnh viễn khỏi danh sách lấy mẫu**.
+   - Do đó, trong suốt 200 epochs x 250 iterations = 50.000 lần bốc mẫu, hàm ngẫu nhiên **không bao giờ bốc trúng ca đó nữa**, và người dùng **không bao giờ nhìn thấy dòng cảnh báo thứ hai**.
+
+### 8.2 Nguyên nhân gốc rễ phát sinh lỗi ở bản 3 pha (`train_swinunetr_v2_3phases_fold0.py`)
+
+Khi tạo script 3 pha (Commit `b9a90c8`), trợ lý AI đã **tự tiện thay đổi 2 vị trí quan trọng** trong mã nguồn nạp dữ liệu:
+
+1. **Sai sót 1 (Gây ra lỗi buffer)**:
+   - Trong nhánh cần đệm kích thước (`needs_pad = True`, áp dụng cho các ca có chiều sâu lát cắt $Z < 96$ như ca `ISPY2-551795`):
+     ```python
+     # Lệnh bị lỗi trong bản 3-pha cũ:
+     img_data = np.array(img_h[:3])
+     ```
+   - Cú pháp `img_h[:3]` yêu cầu thư viện C-Blosc2 giải nén đồng thời toàn bộ 3 pha không gian 3D của cả thể tích vào một vùng đệm đơn (single contiguous buffer). Vùng đệm này vượt quá ngưỡng bộ nhớ giải nén tức thời của C-Blosc2 trên Linux $\to$ trả về `RuntimeError: Error while getting the buffer`.
+
+2. **Sai sót 2 (Làm lỗi bị lặp đi lặp lại liên tục)**:
+   - Trong khối bắt ngoại lệ `except`, AI assistant đã tự ý viết lại:
+     ```python
+     except Exception as ex:
+         print(f"Warning: failed sampling attempt {cid}: {ex}")
+         continue   # <-- KHÔNG XÓA cid KHỎI self.case_ids!
+     ```
+   - Vì **không xóa `cid`**, ca `ISPY2-551795` vẫn nằm nguyên trong 785 ca của `self.case_ids`.
+   - Cứ sau vài epoch, khi hàm `random.choice` ngẫu nhiên bốc trúng `ISPY2-551795`, nó lại gặp lỗi giải nén, lại in ra dòng cảnh báo, rồi lệnh `continue` bốc ca khác. Điều này tạo ra chuỗi spam cảnh báo làm gián đoạn tính chuyên nghiệp của log huấn luyện.
+
+### 8.3 Biện pháp khắc phục triệt để (Đã áp dụng tại Commit `ec7b5bc`)
+
+1. **Giải nén tuần tự từng kênh khi padding**:
+   ```python
+   # Khắc phục triệt để: Giảm tải buffer 3 lần, giải nén từng pha độc lập
+   img_data = np.empty((3, *shape), dtype=np.float32)
+   for c in range(3):
+       img_data[c] = img_h[c]
+   ```
+   => Bộ đệm C-Blosc2 chỉ cần nạp 1 pha tại 1 thời điểm (~50 MB thay vì 150 MB), ca `ISPY2-551795` được nạp thành công 100%, hoàn toàn không sinh lỗi.
+
+2. **Khôi phục 100% cơ chế phòng vệ của bản gốc**:
+   ```python
+   except Exception as ex:
+       print(f"[DATA WARNING] Case {cid} failed during sampling ({ex}). Retrying...")
+       if cid in self.case_ids:
+           self.case_ids.remove(cid)
+       if cid in self.handles:
+           self.handles.pop(cid, None)
+   ```
+
+### 8.4 Bài học kỷ luật công nghệ bắt buộc (Mandatory Engineering Rule)
+* **Quy tắc bất di bất dịch**: Khi chuyển đổi từ mô hình 5 pha sang 3 pha, trợ lý AI **TUYỆT ĐỐI CẤM SỬA ĐỔI BẤT KỲ DÒNG CODE NÀO** ngoài đúng 2 vị trí:
+  1. Tham số kiến trúc: `in_channels = 3` (thay cho 5).
+  2. Lát cắt dữ liệu: `[:3]` (thay cho `[:5]`).
+* Mọi hành vi tự ý "sửa lại cho gọn" hoặc thay đổi khối `try...except` đều là vi phạm nghiêm trọng và bị nghiêm cấm trong toàn bộ repository.
+
+

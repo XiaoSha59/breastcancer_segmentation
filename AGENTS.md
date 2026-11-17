@@ -25,3 +25,12 @@ Khi thực hiện bất kỳ tác vụ lập trình, huấn luyện, đánh giá
 6. **CẤM DÙNG JUPYTER NOTEBOOK TRÊN SERVER TRƯỜNG**: Mọi tác vụ huấn luyện và đánh giá bắt buộc phải chạy qua terminal/script bash trong `tmux`, tuyệt đối không dùng file `.ipynb`.
 7. **MÔI TRƯỜNG ẢO LÀ PYTHON VENV (`breast_env`), KHÔNG DÙNG CONDA**: Môi trường làm việc trên `node1` là Python `venv` tại `~/breast_env`. Luôn kích hoạt bằng lệnh `source ~/breast_env/bin/activate`. Tuyệt đối cấm đề xuất các lệnh `conda`.
 
+## ⛔ NGUYÊN TẮC BẢO TOÀN PIPELINE KHI CHUYỂN ĐỔI PHA (3 PHA vs 5 PHA)
+1. **Chỉ thay đổi đúng 2 điểm**:
+   - Tham số đầu vào: `in_channels = 3` (thay vì 5).
+   - Lát cắt dữ liệu: `[:3]` (thay vì `[:5]`).
+2. **Nghiêm cấm tự ý sửa cấu trúc Batch Sampler & Khối Exception**:
+   - Tuyệt đối không thay đổi cơ chế bắt lỗi `try...except`, luôn giữ nguyên `self.case_ids.remove(cid)` để loại bỏ ca lỗi thầm lặng, không bao giờ spam cảnh báo lặp lại trong log.
+   - Khi giải nén Blosc2 có padding không gian (Z < patch_size), luôn giải nén tuần tự từng pha (`for c in range(3): img_data[c] = img_h[c]`) để loại bỏ hoàn toàn nguy cơ vượt ngưỡng buffer của C-Blosc2.
+3. **Bắt buộc kiểm tra Git Diff đối chiếu**: Trước khi chạy bất kỳ pipeline 3 pha nào, AI assistant phải kiểm tra `git diff` với file 5 pha tương ứng để chứng minh 100% không có sự thay đổi logic ngoài ý muốn.
+
