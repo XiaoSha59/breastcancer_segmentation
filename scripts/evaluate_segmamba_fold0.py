@@ -146,7 +146,10 @@ def main():
 
             inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
 
-            with torch.amp.autocast('cuda'):
+            use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            amp_dtype = torch.bfloat16 if use_bf16 else torch.float32
+
+            with torch.amp.autocast('cuda', dtype=amp_dtype):
                 outputs = sliding_window_inference(
                     inputs=inputs,
                     roi_size=tuple(args.patch_size),
@@ -156,13 +159,11 @@ def main():
                     mode="gaussian",
                 )
 
-            prob = torch.softmax(outputs, dim=1)[:, 1:2]
-            pred = (prob > 0.5).float()
-
-            pred_np = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
+            pred_tensor = torch.argmax(outputs, dim=1)
+            pred_np = pred_tensor[0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
             label_np = lbl_raw[:orig_d, :orig_h, :orig_w]
 
-            intersection = np.logical_and(pred_np, label_np).sum()
+            intersection = np.logical_and(pred_np == 1, label_np == 1).sum()
             union = np.logical_or(pred_np, label_np).sum()
             pred_sum = pred_np.sum()
             label_sum = label_np.sum()
@@ -226,7 +227,7 @@ def main():
                 gt_img.SetDirection(direction)
                 sitk.WriteImage(gt_img, gt_nii_path)
 
-            del inputs, outputs, prob, pred
+            del inputs, outputs, pred_tensor
             if (i + 1) % 10 == 0:
                 torch.cuda.empty_cache()
 
