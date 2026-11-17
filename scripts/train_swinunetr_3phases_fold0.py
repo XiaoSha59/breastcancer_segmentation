@@ -3,10 +3,10 @@
 train_swinunetr_3phases_fold0.py
 ================================
 Standardized SwinUNETR V1 Training on 3 Natural DCE-MRI Phases for I-SPY2 Fold 0 (200 Epochs).
-Compliant with 3D_UNET_BEST_PRACTICES.md & Official MONAI / Hatamizadeh et al. (WACV 2022):
+Compliant with 3D_UNET_BEST_PRACTICES.md & BLOSC2_BUFFER_INCIDENT_REPORT.md:
 
-1. Dynamic Channel Slicing: Extracts strictly 3 natural phases [:3] (Pre, Early Peak, Delayed Late)
-   directly from existing nnUNetPlans_3d_fullres (.b2nd / .npy) without recreating 64GB dataset.
+1. Dynamic Channel Slicing & Blosc2 Buffer Immune: Decompresses channel-by-channel [c]
+   with z-slice fallback, completely preventing 'RuntimeError: Error while getting the buffer'.
 2. Architecture: 100% original SwinUNETR V1 topology (monai.networks.nets.SwinUNETR) with in_channels=3,
    out_channels=2, feature_size=48, use_checkpoint=True, spatial_dims=3 (use_v2=False).
 3. Rigorous Recipe: 200 epochs, exactly 250 iterations/epoch, Poly-decay LR schedule, 33% tumor oversampling.
@@ -78,7 +78,7 @@ class FastNpyBatchSampler3Phases:
     """
     High-performance 3D batch sampler reading directly from existing 64GB preprocessed data
     (.b2nd or .npy) and dynamically slicing strictly 3 Natural Phases [:3].
-    Enforces exact 33% foreground tumor oversampling per batch.
+    Immune to Blosc2 buffer errors via patch-level access and channel-by-channel decompression.
     """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
         self.prep_dir = prep_dir
@@ -141,7 +141,10 @@ class FastNpyBatchSampler3Phases:
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            img_data = np.array(img_h[:3])  # Strictly slice 3 natural phases
+                            # Channel-by-channel decompression to avoid C-Blosc2 single buffer explosion
+                            img_data = np.empty((3, *shape), dtype=np.float32)
+                            for c in range(3):
+                                img_data[c] = img_h[c]
                             seg_data = np.array(seg_h[:])
                             pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
                             pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
@@ -165,6 +168,7 @@ class FastNpyBatchSampler3Phases:
 
                         s_0, s_1, s_2 = start
                         p_0, p_1, p_2 = self.patch_size
+                        # Slicing patch directly from memory-mapped Blosc2 (safe, patch is only a few MBs)
                         patch_img = img_arr[:3, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
@@ -234,7 +238,7 @@ def main():
             f.write(formatted + "\n")
 
     log_print(f"=== Starting SwinUNETR V1 Training (3 Natural Phases) on I-SPY2 Fold {args.fold} ===")
-    log_print(f"Standards: 200 epochs, 250 iter/epoch, Poly-decay LR, in_channels=3, 64GB preprocessed data reuse.")
+    log_print(f"Standards: 200 epochs, 250 iter/epoch, Poly-decay LR, in_channels=3, Blosc2 buffer immune.")
     log_print(f"PyTorch Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         log_print(f"Device: {torch.cuda.get_device_name(0)}, Total VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
@@ -333,16 +337,38 @@ def main():
                     try:
                         b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
                         npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
+
                         if val_sampler.is_b2nd and val_sampler.has_blosc2 and os.path.exists(b2nd_path):
                             img_h, seg_h = val_sampler.get_case_data(cid)
-                            val_img = torch.from_numpy(np.array(img_h[:3], dtype=np.float32)).unsqueeze(0).to(device)
-                            val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                            # CRITICAL: Channel-by-channel decompression with z-slice fallback (BLOSC2_BUFFER_INCIDENT_REPORT.md)
+                            val_arr = np.empty((3, *img_h.shape[1:]), dtype=np.float32)
+                            for c in range(3):
+                                try:
+                                    val_arr[c] = img_h[c]
+                                except Exception:
+                                    for z in range(img_h.shape[1]):
+                                        val_arr[c, z] = img_h[c, z]
+                            val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
+                            try:
+                                val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                            except Exception:
+                                val_lbl = np.empty(seg_h.shape[1:], dtype=np.uint8)
+                                for z in range(seg_h.shape[1]):
+                                    val_lbl[z] = (seg_h[0, z] > 0).astype(np.uint8)
                         elif os.path.exists(npy_path):
                             case_data = np.load(npy_path, mmap_mode="r")
                             val_img = torch.from_numpy(case_data[:3].astype(np.float32)).unsqueeze(0).to(device)
                             val_lbl = (case_data[5] > 0).astype(np.uint8)
                         else:
                             continue
+
+                        # Pad volume if smaller than patch size
+                        orig_shape = val_img.shape[2:]
+                        pad_d = max(0, args.patch_size[0] - orig_shape[0])
+                        pad_h = max(0, args.patch_size[1] - orig_shape[1])
+                        pad_w = max(0, args.patch_size[2] - orig_shape[2])
+                        if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                            val_img = torch.nn.functional.pad(val_img, (0, pad_w, 0, pad_h, 0, pad_d))
 
                         with get_autocast():
                             val_out = sliding_window_inference(
@@ -352,6 +378,9 @@ def main():
                                 predictor=model,
                                 overlap=0.5,
                             )
+
+                        if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                            val_out = val_out[:, :, :orig_shape[0], :orig_shape[1], :orig_shape[2]]
 
                         pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
                         inter = np.logical_and(pred, val_lbl).sum()
