@@ -255,40 +255,71 @@ def main():
                 gt_img.SetDirection(direction)
                 sitk.WriteImage(gt_img, gt_nii_path)
 
+            del inputs, outputs, prob, pred
+            if (i + 1) % 10 == 0:
+                torch.cuda.empty_cache()
+
             if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
-                print(f"[{i+1}/{len(val_ids)}] Case: {cid} | Dice: {dice:.4f} | Running Mean: {np.mean(dice_scores):.4f}")
+                print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
 
     eval_duration = time.time() - eval_start
-    summary = {
+    mean_dice = float(np.mean(dice_scores))
+    median_dice = float(np.median(dice_scores))
+    mean_iou = float(np.mean(iou_scores))
+    mean_recall = float(np.mean(recall_scores))
+    mean_precision = float(np.mean(precision_scores))
+
+    print("\n" + "=" * 60)
+    print(f"SWINUNETR V1 (3 PHASES) EVALUATION SUMMARY ({len(val_ids)} CASES, FOLD {args.fold})")
+    print("=" * 60)
+    print(f"Mean Dice:       {mean_dice:.4f} +/- {np.std(dice_scores):.4f}")
+    print(f"Median Dice:     {median_dice:.4f}")
+    print(f"Mean IoU:        {mean_iou:.4f}")
+    print(f"Mean Recall:     {mean_recall:.4f}")
+    print(f"Mean Precision:  {mean_precision:.4f}")
+    print(f"Inference Time:  {eval_duration:.1f}s ({eval_duration/len(val_ids):.2f}s/case)")
+    print("=" * 60)
+
+    summary_data = {
         "model": "SwinUNETR V1 (3 Natural Phases)",
-        "fold": args.fold,
-        "n_cases": len(dice_scores),
-        "mean_dice": float(np.mean(dice_scores)),
-        "median_dice": float(np.median(dice_scores)),
+        "num_cases": len(val_ids),
+        "mean_dice": mean_dice,
+        "median_dice": median_dice,
         "std_dice": float(np.std(dice_scores)),
-        "mean_iou": float(np.mean(iou_scores)),
-        "mean_recall": float(np.mean(recall_scores)),
-        "mean_precision": float(np.mean(precision_scores)),
-        "evaluation_time_seconds": eval_duration,
+        "mean_iou": mean_iou,
+        "mean_recall": mean_recall,
+        "mean_precision": mean_precision,
+        "eval_time_seconds": eval_duration,
         "patient_metrics": patient_metrics,
+        "metric_per_case": [
+            {
+                "reference_file": f"{cid}.nii.gz",
+                "prediction_file": f"{cid}.nii.gz",
+                "metrics": {
+                    "1": {
+                        "Dice": m["Dice"],
+                        "IoU": m["IoU"],
+                        "Precision": m["Precision"],
+                        "Recall": m["Recall"],
+                    }
+                }
+            }
+            for cid, m in patient_metrics.items()
+        ]
     }
 
-    summary_file = os.path.join(args.output_dir, "summary.json")
-    with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary_data, f, indent=2)
 
-    print("================================================================================")
-    print("             SWINUNETR V1 (3 PHASES) EVALUATION SUMMARY                         ")
-    print("================================================================================")
-    print(f"Evaluated Cases : {len(dice_scores)} / {len(val_ids)}")
-    print(f"Mean Dice       : {summary['mean_dice']:.4f} +/- {summary['std_dice']:.4f}")
-    print(f"Median Dice     : {summary['median_dice']:.4f}")
-    print(f"Mean IoU        : {summary['mean_iou']:.4f}")
-    print(f"Mean Recall     : {summary['mean_recall']:.4f}")
-    print(f"Mean Precision  : {summary['mean_precision']:.4f}")
-    print(f"Evaluation Time : {eval_duration:.1f}s")
-    print(f"Results Saved   : {summary_file}")
-    print("================================================================================")
+    with open(os.path.join(val_out_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary_data, f, indent=2)
+
+    # Compute official paper surface metrics (HD95 & ASSD)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    paper_metrics_script = os.path.join(script_dir, "compute_paper_metrics.py")
+    if os.path.exists(paper_metrics_script):
+        print("\nComputing official paper surface metrics (HD95, ASSD)...")
+        os.system(f"python3 {paper_metrics_script} {args.output_dir} 'SwinUNETR V1 3-Phases (Transformer, MONAI)'")
 
 if __name__ == "__main__":
     main()
