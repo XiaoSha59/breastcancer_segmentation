@@ -23,6 +23,12 @@ import monai
 from monai.networks.nets import SwinUNETR
 from monai.inferers import sliding_window_inference
 
+# HARDWARE COMPATIBILITY: Disable cuDNN globally on node1 to prevent CUDNN_STATUS_NOT_INITIALIZED
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 def main():
     cid = sys.argv[1] if len(sys.argv) > 1 else "ISPY2-987995"
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0"
