@@ -81,6 +81,11 @@ if [ ! -d "$PLAN_DIR" ]; then
 fi
 echo "Verified preprocessed directory $PLAN_DIR."
 
+# Rule 1 from GCP_GUIDE.md: Clean up orphaned watchdog & shutdown timers before new run
+pkill -f safety_guard || true
+sudo pkill -f shutdown || true
+export nnUNet_n_proc_DA=4
+
 # STEP 3: LAUNCH 3D SEGMAMBA (3 PHASES) TRAINING (200 EPOCHS)
 echo "=== STEP 3: LAUNCH 3D SEGMAMBA (3 PHASES) TRAINING (200 EPOCHS) ==="
 LOG_FILE="$RESULTS_DIR/train.log"
@@ -110,7 +115,26 @@ python3 -u "$SCRIPT_DIR/train_segmamba_3phases_fold0.py" \
     --initial_lr 1e-4 \
     --weight_decay 1e-5 \
     --val_interval "$VAL_INT" \
-    $EXTRA_FLAGS
+    $EXTRA_FLAGS &
+TRAIN_PID=$!
+echo "[$(date)] SegMamba 3D (3 Phases) training started with PID $TRAIN_PID ($NUM_EPOCHS epochs)"
+
+# Layer 2 Watchdog Daemon (GCP_GUIDE.md Section 5.2 & README_PROJECT_PLAN.md Section 10.1)
+python3 -u "$SCRIPT_DIR/safety_guard.py" $TRAIN_PID > /home/XiaoSha/safety_guard.log 2>&1 &
+GUARD_PID=$!
+echo "[$(date)] Independent Safety Guard watchdog started with PID $GUARD_PID monitoring PID $TRAIN_PID"
+
+wait $TRAIN_PID
+TRAIN_EXIT=$?
+echo "[$(date)] SegMamba 3D training finished with exit code $TRAIN_EXIT"
+
+# Rule 2 from GCP_GUIDE.md: Disarm watchdog immediately when training finishes to prevent premature shutdown during eval
+kill $GUARD_PID 2>/dev/null || true
+
+if [ $TRAIN_EXIT -ne 0 ]; then
+    echo "Training failed with exit code $TRAIN_EXIT"
+    exit $TRAIN_EXIT
+fi
 
 echo "=== STEP 4: VERIFY CHECKPOINT ==="
 CHECKPOINT_BEST="$RESULTS_DIR/checkpoint_best.pth"
