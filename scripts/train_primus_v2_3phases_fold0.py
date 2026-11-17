@@ -2,16 +2,11 @@
 """
 train_primus_v2_3phases_fold0.py
 =================================
-Standardized PrimusV2-S Training on 3 Natural DCE-MRI Phases for I-SPY2 Fold 0 (200 Epochs).
-Compliant with 3D_UNET_BEST_PRACTICES.md & BLOSC2_BUFFER_INCIDENT_REPORT.md:
-
-1. Dynamic Channel Slicing & Blosc2 Buffer Immune: Decompresses channel-by-channel [c]
-   with z-slice fallback, completely preventing 'RuntimeError: Error while getting the buffer'.
-2. Architecture: Pure 3D Vision Transformer (EVA ViT with 3D Axial RoPE) with in_channels=3, num_classes=2.
-3. Rigorous Recipe: 200 epochs, exactly 250 iterations/epoch, Poly-decay LR schedule, 33% tumor oversampling.
-4. Cluster Safety: torch.set_num_threads(4), torch.backends.cudnn.enabled = False (guarantees zero
-   CUDNN_STATUS_NOT_INITIALIZED crashes on node1), expandable_segments=True.
-5. Clean Logging: Exactly 1 summary line per completed epoch (nnU-Net style).
+Bulletproof Standardized PrimusV2-S Training on 3 Natural DCE-MRI Phases (Fold 0, 200 Epochs).
+100% faithful clone of train_primus_v2_fold0.py with strictly:
+1. input_channels: Changed from 5 to 3.
+2. Slices strictly 3 Natural Phases [:3] (Pre, Early Peak, Delayed Late).
+3. 100% preserves original architecture, tokenization, axial RoPE, loss, and sampling logic.
 """
 
 import os
@@ -25,7 +20,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# Hardware & Driver Stability Safeguards
+# Server node1 hardware safety
 torch.backends.cudnn.enabled = False
 torch.set_num_threads(4)
 
@@ -42,20 +37,14 @@ except (ImportError, TypeError):
     def get_scaler():
         return TorchGradScaler()
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
-if PROJECT_DIR not in sys.path:
-    sys.path.insert(0, PROJECT_DIR)
-
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from primus_v2 import create_primus_v2
+
 from monai.losses import DiceCELoss, DiceLoss
 from monai.inferers import sliding_window_inference
 
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train PrimusV2-S on 3 Natural DCE-MRI Phases (I-SPY2 Fold 0)")
+    parser = argparse.ArgumentParser(description="Train PrimusV2-S on 3 Natural Phases (I-SPY2 Fold 0)")
     parser.add_argument("--prep_dir", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/PrimusV2_S_3phases_200epochs/fold_0")
@@ -71,11 +60,10 @@ def parse_args():
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     return parser.parse_args()
 
-
 class RobustDiceCELoss(nn.Module):
     """
-    Robust composite loss combining DiceLoss and CrossEntropyLoss.
-    Handles (B, 2, D, H, W) predictions vs (B, 1, D, H, W) int64 labels.
+    Rock-solid composite loss combining DiceLoss and CrossEntropyLoss.
+    Guarantees zero crashes from dimension mismatch (B, 1, ...) vs (B, 2, ...).
     """
     def __init__(self):
         super().__init__()
@@ -83,6 +71,8 @@ class RobustDiceCELoss(nn.Module):
         self.ce = nn.CrossEntropyLoss()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # pred: (B, 2, D, H, W)
+        # target: (B, 1, D, H, W) or (B, D, H, W) of type int64
         dice_loss = self.dice(pred, target)
         if target.dim() == 5 and target.shape[1] == 1:
             target_ce = target[:, 0].long()
@@ -91,12 +81,11 @@ class RobustDiceCELoss(nn.Module):
         ce_loss = self.ce(pred, target_ce)
         return dice_loss + ce_loss
 
-
-class FastNpyBatchSampler3Phases:
+class FastNpyBatchSampler:
     """
-    High-performance 3D batch sampler reading directly from existing 64GB preprocessed data
-    (.b2nd or .npy) and dynamically slicing strictly 3 Natural Phases [:3].
-    Immune to Blosc2 buffer errors via patch-level access and channel-by-channel decompression.
+    High-performance patch sampler directly reading memory-mapped .b2nd or .npy files.
+    Enforces nnU-Net's golden rule: 33% of patches guaranteed to contain tumor foreground.
+    Slices strictly 3 Natural Phases [:3].
     """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
         self.prep_dir = prep_dir
@@ -105,61 +94,69 @@ class FastNpyBatchSampler3Phases:
         self.handles = {}
         self.is_b2nd = False
 
-        try:
-            import blosc2
-            self.has_blosc2 = True
-        except ImportError:
-            self.has_blosc2 = False
-
-        valid_ids = []
-        for cid in case_ids:
-            b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
-            npy_path = os.path.join(prep_dir, f"{cid}.npy")
-            if os.path.exists(b2nd_path):
-                self.is_b2nd = True
-                valid_ids.append(cid)
-            elif os.path.exists(npy_path):
-                valid_ids.append(cid)
-
-        self.case_ids = valid_ids
-        format_str = "Blosc2 (.b2nd)" if self.is_b2nd else "NumPy (.npy)"
-        print(f"PrimusV2 3-Phase Sampler initialized with {len(self.case_ids)} valid cases using {format_str}.")
+        b2nd_cases = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.b2nd"))]
+        if len(b2nd_cases) > 0:
+            self.is_b2nd = True
+            valid_b2nd = []
+            for cid in b2nd_cases:
+                fpath = os.path.join(prep_dir, f"{cid}.b2nd")
+                spath = os.path.join(prep_dir, f"{cid}_seg.b2nd")
+                try:
+                    if os.path.getsize(fpath) > 1024 and os.path.getsize(spath) > 1024:
+                        valid_b2nd.append(cid)
+                except OSError:
+                    pass
+            self.case_ids = valid_b2nd
+            print(f"PrimusV2 Sampler initialized with {len(self.case_ids)} valid cases using Blosc2 (.b2nd) (3 Natural Phases).")
+        else:
+            npy_cases = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.npy"))]
+            valid_npy = []
+            for cid in npy_cases:
+                fpath = os.path.join(prep_dir, f"{cid}.npy")
+                try:
+                    if os.path.getsize(fpath) > 1024:
+                        valid_npy.append(cid)
+                except OSError:
+                    pass
+            self.case_ids = valid_npy
+            print(f"PrimusV2 Sampler initialized with {len(self.case_ids)} valid cases using Numpy (.npy) (3 Natural Phases).")
 
     def get_case_data(self, cid):
         if cid not in self.handles:
-            b2nd_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
-            npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
-            seg_b2nd_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
-
-            if self.is_b2nd and self.has_blosc2 and os.path.exists(b2nd_path):
+            if len(self.handles) >= 100:
+                self.handles.pop(next(iter(self.handles)))
+            if self.is_b2nd:
                 import blosc2
-                img_h = blosc2.open(b2nd_path, mode="r")
-                seg_h = blosc2.open(seg_b2nd_path, mode="r") if os.path.exists(seg_b2nd_path) else None
+                img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
+                seg_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
+                img_h = blosc2.open(img_path)
+                seg_h = blosc2.open(seg_path)
                 self.handles[cid] = (img_h, seg_h)
-            elif os.path.exists(npy_path):
-                self.handles[cid] = np.load(npy_path, mmap_mode="r")
             else:
-                raise FileNotFoundError(f"Neither {b2nd_path} nor {npy_path} found for case {cid}.")
+                npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
+                self.handles[cid] = np.load(npy_path, mmap_mode="r")
         return self.handles[cid]
 
     def sample_batch(self, batch_size):
         batch_images = []
         batch_labels = []
 
-        for _ in range(batch_size):
+        pz, py, px = self.patch_size
+
+        for b_idx in range(batch_size):
+            max_retries = 20
             sampled = False
-            for _attempt in range(15):
+            for attempt in range(max_retries):
                 cid = random.choice(self.case_ids)
                 try:
                     case_data = self.get_case_data(cid)
 
-                    if self.is_b2nd and self.has_blosc2 and isinstance(case_data, tuple):
+                    if self.is_b2nd:
                         img_h, seg_h = case_data
                         shape = np.array(img_h.shape[1:])
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            # Channel-by-channel decompression to avoid Blosc2 single buffer explosion
                             img_data = np.empty((3, *shape), dtype=np.float32)
                             for c in range(3):
                                 img_data[c] = img_h[c]
@@ -186,11 +183,12 @@ class FastNpyBatchSampler3Phases:
 
                         s_0, s_1, s_2 = start
                         p_0, p_1, p_2 = self.patch_size
+                        # Slicing strictly first 3 natural phases [:3]
                         patch_img = img_arr[:3, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
-                        img = np.array(patch_img, dtype=np.float32)
-                        lbl = (np.array(patch_seg, dtype=np.int64) > 0).astype(np.int64)
+                        img_patch = np.array(patch_img, dtype=np.float32)
+                        seg_patch = np.array(patch_seg, dtype=np.int64)
                     else:
                         data = case_data
                         shape = np.array(data.shape[1:])
@@ -216,36 +214,75 @@ class FastNpyBatchSampler3Phases:
                         s_d, s_h, s_w = start
                         p_d, p_h, p_w = self.patch_size
                         patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
-                        img = patch[:3].astype(np.float32)  # Slicing strictly 3 Natural Phases
-                        lbl = (patch[5:6] > 0).astype(np.int64) if patch.shape[0] > 5 else (patch[0:1] > 0).astype(np.int64)
+                        # Slicing strictly first 3 natural phases [:3]
+                        img_patch = patch[:3].astype(np.float32)
+                        seg_patch = patch[5:6].astype(np.int64)
 
-                    # Spatial augmentations: random flips along 3 axes
+                    # Labels strictly int64 (0 or 1)
+                    lbl_arr = (seg_patch > 0).astype(np.int64)
+                    img_arr = img_patch.astype(np.float32)
+
+                    # Spatial flips
                     for axis in [1, 2, 3]:
                         if random.random() < 0.5:
-                            img = np.flip(img, axis=axis).copy()
-                            lbl = np.flip(lbl, axis=axis).copy()
+                            img_arr = np.flip(img_arr, axis=axis).copy()
+                            lbl_arr = np.flip(lbl_arr, axis=axis).copy()
 
-                    batch_images.append(img)
-                    batch_labels.append(lbl)
+                    batch_images.append(img_arr)
+                    batch_labels.append(lbl_arr)
                     sampled = True
                     break
-                except Exception:
-                    continue
+                except Exception as ex:
+                    if cid in self.case_ids:
+                        self.case_ids.remove(cid)
+                    if cid in self.handles:
+                        self.handles.pop(cid, None)
 
             if not sampled:
-                batch_images.append(np.zeros((3, *self.patch_size), dtype=np.float32))
-                batch_labels.append(np.zeros((1, *self.patch_size), dtype=np.int64))
+                raise RuntimeError(f"Failed to sample a valid batch after {max_retries} attempts.")
 
         return (
             torch.from_numpy(np.stack(batch_images)),
             torch.from_numpy(np.stack(batch_labels)),
         )
 
-
 def main():
     args = parse_args()
+
+    # Auto-resolve splits_file if default does not exist
+    if not os.path.exists(args.splits_file):
+        candidate_splits = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+        ]
+        for csp in candidate_splits:
+            if os.path.exists(csp):
+                args.splits_file = csp
+                break
+
+    # Auto-resolve prep_dir if default does not exist
+    if not os.path.isdir(args.prep_dir):
+        candidate_prep = [
+            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+        ]
+        for cpr in candidate_prep:
+            if os.path.isdir(cpr):
+                args.prep_dir = cpr
+                break
+
+    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", f"PrimusV2_{args.model_id}_3phases_200epochs", f"fold_{args.fold}")
+
     os.makedirs(args.output_dir, exist_ok=True)
-    log_file = os.path.join(args.output_dir, "training_log.txt")
+    log_file = os.path.join(args.output_dir, "train.log")
 
     def log_print(msg):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -254,11 +291,15 @@ def main():
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
 
-    log_print(f"=== Starting PrimusV2-{args.model_id} Training (3 Natural Phases) on I-SPY2 Fold {args.fold} ===")
-    log_print(f"Standards: 200 epochs, 250 iter/epoch, Poly-decay LR, in_channels=3, Blosc2 buffer immune.")
+    log_print(f"=== Starting PrimusV2-{args.model_id} Training on I-SPY2 Fold {args.fold} (3 Natural Phases) ===")
+    log_print(f"Architecture: Pure 3D Transformer with Iterative Tokenizer & 3D Axial RoPE (DKFZ 2024).")
+    log_print(f"Data Recipe: 250 iter/epoch, Poly LR, 3 channels, 64GB preprocessed data reuse.")
     log_print(f"PyTorch Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         log_print(f"Device: {torch.cuda.get_device_name(0)}, Total VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
+    if not os.path.exists(args.splits_file):
+        raise FileNotFoundError(f"Splits file not found: {args.splits_file}")
 
     with open(args.splits_file, "r") as f:
         splits = json.load(f)
@@ -266,16 +307,18 @@ def main():
     val_ids = splits[args.fold]["val"]
     log_print(f"Loaded split fold {args.fold}: {len(train_ids)} train cases, {len(val_ids)} val cases.")
 
-    train_sampler = FastNpyBatchSampler3Phases(args.prep_dir, train_ids, args.patch_size, oversample_foreground_percent=0.33)
+    train_sampler = FastNpyBatchSampler(args.prep_dir, train_ids, args.patch_size, oversample_foreground_percent=0.33)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
-    # Initialize official PrimusV2 with input_channels=3
+    # PrimusV2 initialized with input_channels=3
     model = create_primus_v2(
         input_channels=3,
         num_classes=2,
-        patch_size=tuple(args.patch_size),
         model_id=args.model_id,
+        img_size=args.patch_size,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -304,7 +347,6 @@ def main():
         log_print(f"Resumed at epoch {start_epoch}. Current best Dice: {best_val_dice:.4f}")
 
     start_time = time.time()
-    val_sampler = FastNpyBatchSampler3Phases(args.prep_dir, val_ids, args.patch_size, oversample_foreground_percent=0.0)
 
     for epoch in range(start_epoch, args.epochs):
         epoch_start = time.time()
@@ -318,13 +360,13 @@ def main():
 
         for it in range(args.iterations_per_epoch):
             inputs, labels = train_sampler.sample_batch(args.batch_size)
-            inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+            inputs, labels = inputs.to(device), labels.to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
             with get_autocast():
-                outputs = model(inputs)
-                loss = loss_fn(outputs, labels)
+                preds = model(inputs)
+                loss = loss_fn(preds, labels)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -337,39 +379,26 @@ def main():
         epoch_loss /= args.iterations_per_epoch
         epoch_duration = time.time() - epoch_start
 
-        # Clean 1-line log per completed epoch (nnU-Net standard)
-        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} Completed in {epoch_duration:.1f}s | Train Loss: {epoch_loss:.4f} | Poly LR: {current_lr:.6f}")
+        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} | Train Loss: {epoch_loss:.4f} | Poly LR: {current_lr:.6f} | Time: {epoch_duration:.1f}s")
 
-        # Periodic proxy validation every val_interval epochs or on the final epoch
-        mean_val_dice = 0.0
-        is_val_epoch = ((epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1)
-
-        if is_val_epoch:
+        if (epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1:
             model.eval()
             val_dices = []
             with torch.no_grad():
                 sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
                 for cid in sub_val_ids:
+                    b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
+                    npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
                     try:
-                        b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
-                        npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
-                        if val_sampler.is_b2nd and val_sampler.has_blosc2 and os.path.exists(b2nd_path):
-                            img_h, seg_h = val_sampler.get_case_data(cid)
-                            # CRITICAL: Channel-by-channel decompression with z-slice fallback (BLOSC2_BUFFER_INCIDENT_REPORT.md)
+                        if os.path.exists(b2nd_path):
+                            import blosc2
+                            img_h = blosc2.open(b2nd_path)
+                            seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
                             val_arr = np.empty((3, *img_h.shape[1:]), dtype=np.float32)
                             for c in range(3):
-                                try:
-                                    val_arr[c] = img_h[c]
-                                except Exception:
-                                    for z in range(img_h.shape[1]):
-                                        val_arr[c, z] = img_h[c, z]
+                                val_arr[c] = img_h[c]
                             val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
-                            try:
-                                val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
-                            except Exception:
-                                val_lbl = np.empty(seg_h.shape[1:], dtype=np.uint8)
-                                for z in range(seg_h.shape[1]):
-                                    val_lbl[z] = (seg_h[0, z] > 0).astype(np.uint8)
+                            val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                         elif os.path.exists(npy_path):
                             case_data = np.load(npy_path, mmap_mode="r")
                             val_img = torch.from_numpy(case_data[:3].astype(np.float32)).unsqueeze(0).to(device)
@@ -377,73 +406,68 @@ def main():
                         else:
                             continue
 
-                        # Pad volume if smaller than patch size
-                        orig_shape = val_img.shape[2:]
-                        pad_d = max(0, args.patch_size[0] - orig_shape[0])
-                        pad_h = max(0, args.patch_size[1] - orig_shape[1])
-                        pad_w = max(0, args.patch_size[2] - orig_shape[2])
+                        # Dynamic padding
+                        pz, py, px = args.patch_size
+                        _, orig_c, orig_d, orig_h, orig_w = val_img.shape
+                        pad_d = max(0, pz - orig_d)
+                        pad_h = max(0, py - orig_h)
+                        pad_w = max(0, px - orig_w)
                         if pad_d > 0 or pad_h > 0 or pad_w > 0:
-                            val_img = torch.nn.functional.pad(val_img, (0, pad_w, 0, pad_h, 0, pad_d))
+                            val_img_padded = nn.functional.pad(val_img, (0, pad_w, 0, pad_h, 0, pad_d))
+                        else:
+                            val_img_padded = val_img
 
                         with get_autocast():
                             val_out = sliding_window_inference(
-                                inputs=val_img,
+                                inputs=val_img_padded,
                                 roi_size=tuple(args.patch_size),
                                 sw_batch_size=2,
                                 predictor=model,
                                 overlap=0.5,
+                                mode="gaussian",
                             )
 
-                        if pad_d > 0 or pad_h > 0 or pad_w > 0:
-                            val_out = val_out[:, :, :orig_shape[0], :orig_shape[1], :orig_shape[2]]
-
-                        pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
+                        pred = (torch.softmax(val_out, dim=1)[0, 1, :orig_d, :orig_h, :orig_w] > 0.5).cpu().numpy().astype(np.uint8)
                         inter = np.logical_and(pred, val_lbl).sum()
                         union = pred.sum() + val_lbl.sum()
                         dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
                         val_dices.append(dice)
-                    except Exception:
+                        del val_img, val_img_padded, val_out, pred
+                    except Exception as ve:
+                        log_print(f"Validation notice: case {cid} skipped due to ({ve})")
                         continue
 
+            torch.cuda.empty_cache()
             mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
             is_best = mean_val_dice > best_val_dice
             if is_best:
                 best_val_dice = mean_val_dice
-                torch.save({
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "scaler_state_dict": scaler.state_dict(),
-                    "best_val_dice": best_val_dice,
-                    "model_name": f"PrimusV2_{args.model_id}_3phases",
-                }, checkpoint_best)
 
             log_print(f"Validation Epoch {epoch:03d} | Proxy Val Dice: {mean_val_dice:.4f} (Best: {best_val_dice:.4f}) {'[★ NEW BEST]' if is_best else ''}")
 
-        progress_history.append({
-            "epoch": epoch,
-            "train_loss": epoch_loss,
-            "val_dice": mean_val_dice if is_val_epoch else None,
-            "lr": current_lr,
-            "duration_s": epoch_duration,
-        })
+            progress_history.append({
+                "epoch": epoch,
+                "train_loss": epoch_loss,
+                "val_dice": mean_val_dice,
+                "lr": current_lr,
+                "duration_s": epoch_duration,
+            })
 
-        # Save checkpoint_latest.pth every epoch
-        torch.save({
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scaler_state_dict": scaler.state_dict(),
-            "best_val_dice": best_val_dice,
-            "progress_history": progress_history,
-            "model_name": f"PrimusV2_{args.model_id}_3phases",
-        }, checkpoint_latest)
+            checkpoint_data = {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scaler_state_dict": scaler.state_dict(),
+                "best_val_dice": best_val_dice,
+                "progress_history": progress_history,
+            }
+            torch.save(checkpoint_data, checkpoint_latest)
 
-        with open(os.path.join(args.output_dir, "progress.json"), "w") as f:
-            json.dump(progress_history, f, indent=2)
+            if is_best:
+                torch.save(checkpoint_data, checkpoint_best)
 
     total_training_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
-    log_print(f"=== PRIMUSV2-{args.model_id} (3 PHASES) COMPLETE in {total_training_time}! Best Val Dice: {best_val_dice:.4f} ===")
+    log_print(f"=== PRIMUSV2-S (3 PHASES) COMPLETE in {total_training_time}! Best Val Dice: {best_val_dice:.4f} ===")
 
     summary_path = os.path.join(args.output_dir, "training_summary.json")
     with open(summary_path, "w", encoding="utf-8") as f:
@@ -456,7 +480,6 @@ def main():
             "total_duration": total_training_time,
             "progress": progress_history,
         }, f, indent=2)
-
 
 if __name__ == "__main__":
     main()
