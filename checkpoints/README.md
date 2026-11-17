@@ -9,14 +9,17 @@ Thư mục lưu trữ toàn bộ trọng số mô hình tốt nhất (`checkpoin
 | STT | Kiến trúc mô hình | Phân loại kiến trúc | Trạng thái | Mean Dice | Median Dice | Median HD95 | File Checkpoint & Logs |
 | :---: | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
 | 1 | **ResEnc-UNet L** | Pure CNN (Residual Blocks) | **HOÀN TẤT** | **0.7793** | **0.8207** | **4.36 mm** | `resenc_l_fold0_checkpoint_best.pth` (1.08 GB) |
-| 2 | **Standard 3D nnU-Net** | Pure CNN (Plain Conv + DS) | **HOÀN TẤT** | 0.7432 | 0.7940 | 7.28 mm | `standard_nnunet_fold0_checkpoint_best.pth` (240 MB) |
-| 3 | **MedNeXt-L k3** | Pure CNN (ConvNeXt Inverted) | **HOÀN TẤT** | 0.7347 | 0.7924 | 6.40 mm | `mednext_l_k3_fold0_checkpoint_best.pth` (414 MB) |
-| 4 | **Vanilla 3D U-Net** | Pure CNN (Plain Conv, No DS) | **HOÀN TẤT** | 0.7129 | 0.7668 | 9.43 mm | `vanilla_3dunet_fold0_checkpoint_best.pth` (240 MB) |
-| 5 | **U-Mamba Bot 3D** | Hybrid CNN + Mamba SSM | **HOÀN TẤT** | 0.7481 | 0.8040 | 6.32 mm | `umamba_fold0_checkpoint_best.pth` (337 MB) |
-| 6 | **SwinUNETR v1** | Shifted Window ViT | **HOÀN TẤT** | **0.7250 ± 0.1837** | **0.7777** | **13.60 mm** | `swinunetr_fold0_checkpoint_best.pth` (754 MB) |
-| 7 | **SwinUNETR v2** | ResConv + Swin ViT v2 | **ĐANG CHẠY (node1)** | *(Đạt 0.6140 tại Ep 39)* | -- | -- | `swinunetr_v2_fold0_checkpoint_best.pth` (880 MB) |
-| 8 | **SegMamba 3D** | Tri-orientated 3D Mamba | **ĐANG CHẠY (GCP L4)** | *(Đạt 0.4162 tại Ep 4)* | -- | -- | GCP VM `cancer-seg-gpu` (BFloat16) |
-| 9 | **PrimusV2-S** | Pure ViT + 3D Axial RoPE | **SẴN SÀNG (node1)** | -- | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
+| 2 | **U-Mamba Bot 3D** | Hybrid CNN + Mamba SSM | **HOÀN TẤT** | **0.7481** | **0.8040** | **6.32 mm** | `umamba_fold0_checkpoint_best.pth` (337 MB) |
+| 3 | **Standard 3D nnU-Net** | Pure CNN (Plain Conv + DS) | **HOÀN TẤT** | 0.7432 | 0.7940 | 7.28 mm | `standard_nnunet_fold0_checkpoint_best.pth` (240 MB) |
+| 4 | **3D SegMamba (5 pha)** | Pure 3D Mamba SSM (Tri-orientated) | **HOÀN TẤT** | **0.7413** | **0.7910** | **7.57 mm** | `segmamba_fold0_checkpoint_best.pth` (803 MB) |
+| 5 | **3D SegMamba (3 pha)** | Pure 3D Mamba SSM (3 Natural Phases) | **ĐANG CHẠY (GCP L4)** | -- | -- | -- | GCP VM `cancer-seg-gpu` (BFloat16, tmux `segmamba_3p`) |
+| 6 | **MedNeXt-L k3 (5 pha)** | Pure CNN (ConvNeXt Inverted) | **HOÀN TẤT** | 0.7347 | 0.7924 | 6.40 mm | `mednext_5phases/checkpoint_best.pth` (414 MB) |
+| 7 | **MedNeXt-L k3 (3 pha)** | Pure CNN (3 Natural Phases) | **HOÀN TẤT** | 0.7341 | 0.7800 | 8.49 mm | `mednext_3phases/fold_0/checkpoint_best.pth` (395 MB) |
+| 8 | **SwinUNETR v1** | Shifted Window ViT | **HOÀN TẤT** | 0.7250 | 0.7777 | 13.60 mm | `swinunetr_fold0_checkpoint_best.pth` (754 MB) |
+| 9 | **SwinUNETR v2 (5 pha)** | ResConv + Swin ViT v2 | **HOÀN TẤT** | 0.7232 | 0.7661 | 20.42 mm | `swinunetr_v2/checkpoint_best.pth` (881 MB) |
+| 10 | **SwinUNETR v2 (3 pha)** | ResConv + Swin ViT (3 Natural Phases) | **ĐANG CHẠY (node1)** | -- | -- | -- | Server `node1` RTX 4090 (tmux `segmamba_0`) |
+| 11 | **Vanilla 3D U-Net** | Pure CNN (Plain Conv, No DS) | **HOÀN TẤT** | 0.7129 | 0.7668 | 9.43 mm | `vanilla_3dunet_fold0_checkpoint_best.pth` (240 MB) |
+| 12 | **PrimusV2-S** | Pure ViT + 3D Axial RoPE | **SẴN SÀNG (node1)** | -- | -- | -- | Script: `scripts/run_primus_v2_server.sh` |
 
 ---
 
