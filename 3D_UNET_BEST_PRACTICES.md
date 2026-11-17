@@ -215,5 +215,38 @@ Trong giai đoạn kiểm thử mô hình (Inference trên 197 ca Validation):
 * **Quy tắc vàng 1:** Mọi script kiểm thử (`evaluate_*.py`) **bắt buộc phải ưu tiên nhánh đọc ảnh gốc NIfTI (`if has_raw:`) bằng SimpleITK lên hàng đầu**. Việc này vừa miễn nhiễm 100% với lỗi bộ đệm Blosc2, vừa giữ nguyên ma trận toạ độ (Spacing, Origin, Direction) chuẩn giải phẫu để tính toán **HD95** và **ASSD** chính xác tuyệt đối.
 * **Quy tắc vàng 2 (Phòng vệ chiều sâu):** Nếu bắt buộc phải nạp từ cache `.b2nd` (khi môi trường không có file `.nii.gz` thô), hàm đọc bắt buộc phải có cơ chế fallback giải nén từng lát Z (`img_h[c, z]`) để bộ đệm mỗi lần chỉ tốn 1 MB, tuyệt đối không được đọc nguyên khối một lần trên các ca ngoại cỡ.
 
+---
 
+### 9.5. 🎯 Quy Chuẩn Bóc Tách 3 Pha (Ablation Study): Tận Dụng 100% Mã Nguồn Python Tùy Biến (Không Cần Tạo Dataset Mới)
 
+#### 1. Nguyên Lý Tự Chủ Mã Nguồn Dự Án (Code Ownership & Flexibility):
+* Toàn bộ pipeline huấn luyện trong repository này (`train_*.py`) được xây dựng bằng **mã nguồn Python/PyTorch tự chủ**, trực tiếp quản trị class DataLoader, Patch Sampler và kiến trúc mạng.
+* Chúng ta **hoàn toàn KHÔNG bị trói buộc** bởi các hạn chế đóng hộp của các công cụ dòng lệnh (như lệnh CLI thô `nnUNetv2_train` - vốn bị phụ thuộc vào số kênh khai báo tĩnh trong `dataset.json`).
+
+#### 2. Kỹ Thuật Cắt Lát Động Kênh Thời Gian (Dynamic Channel Slicing):
+* Bộ dữ liệu tiền xử lý chuẩn hóa `Dataset501` (dù ở định dạng `.b2nd`, `.npy` hay ảnh thô `.nii.gz`) đã lưu trữ sẵn 5 kênh:
+  * Kênh 0: Pha trước tiêm (Pre-contrast / T0)
+  * Kênh 1: Pha sớm ngấm thuốc (Early Peak / T_early)
+  * Kênh 2: Pha muộn thải thuốc (Delayed Late / T_late)
+  * Kênh 3: Hiệu vi sai trừ sớm (Sub_early = Early - Pre)
+  * Kênh 4: Hiệu vi sai trừ muộn (Sub_late = Late - Pre)
+* Khi thực hiện nghiên cứu bóc tách **3 pha tự nhiên** (Pre, Early, Late) theo tiêu chuẩn y sinh của Naomi Fridman (Nature Scientific Data):
+  * **TUYỆT ĐỐI KHÔNG CẦN TẠO DATASET MỚI** (như `Dataset502` hay bất kỳ thư mục phụ trợ nào).
+  * **TUYỆT ĐỐI KHÔNG CẦN CHẠY LẠI TIỀN XỬ LÝ** (`nnUNetv2_plan_and_preprocess`), tiết kiệm 100% thời gian chờ 3-4 tiếng và 40 GB dung lượng ổ cứng.
+  * Chỉ cần điều chỉnh đúng **2 vị trí cốt lõi** trong script Python huấn luyện:
+    1. **Khởi tạo mô hình:** Khai báo số kênh đầu vào `in_channels=3` (thay vì 5):
+       ```python
+       model = ModelArchitecture(in_channels=3, num_classes=2, ...)
+       ```
+    2. **Hàm Patch Sampler / DataLoader:** Cắt lát lấy 3 kênh đầu tiên `[:3]` trực tiếp từ tensor nạp:
+       ```python
+       # Lấy đúng 3 kênh 0, 1, 2; hoàn toàn bỏ qua kênh 3 và 4
+       patch_img = img_arr[:3, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+       ```
+
+#### 3. Minh Chứng Thực Nghiệm Thành Công:
+* Minh chứng điển hình nhất là **MedNeXt-L k3 (3 pha)** (`train_mednext_3phases_fold0.py`):
+  * Tận dụng 100% dữ liệu có sẵn của `Dataset501`.
+  * Chạy mượt mà 200 epochs trong 18h 54m (tăng tốc 40%).
+  * Đạt Best Proxy Val Dice **0.7912** và hoàn tất đánh giá 197 ca mà không cần sinh thêm bất kỳ file dữ liệu trung gian nào.
+* Quy tắc này được áp dụng nhất quán cho toàn bộ các mô hình tiếp theo trong portfolio: **SwinUNETR v2 (3 pha)**, **Vanilla 3D U-Net (3 pha)**, **PrimusV2 (3 pha)** và **U-Mamba (3 pha)**.
