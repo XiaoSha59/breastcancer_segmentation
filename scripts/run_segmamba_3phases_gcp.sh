@@ -144,3 +144,6 @@ echo "  3D SEGMAMBA (3 PHASES) PIPELINE COMPLETED SUCCESSFULLY ON GCP!"
 echo "  Results ready in: $RESULTS_DIR"
 echo "  Shutting down VM in 120 seconds..."
 echo "=============================================================================="
+
+sleep 120
+sudo /sbin/shutdown -h now || sudo poweroff || true
