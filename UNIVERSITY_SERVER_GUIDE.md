@@ -25,14 +25,43 @@ Tài liệu này tổng hợp toàn bộ các **nguyên tắc bắt buộc từ 
   * Các bản code "tự chế" tiềm ẩn nguy cơ bùng nổ chiều batch (như lỗi batch 32.768 trong SegMamba nháp) gây tràn RAM, kích hoạt Linux OOM-Killer làm sập toàn bộ máy chủ trường và ảnh hưởng đến các thành viên khác trong phòng lab.
   * Làm sai lệch bản chất mô hình khiến kết quả trong luận văn/bài báo bị bác bỏ hoàn toàn.
 
-### 0.2 ⛔ NGUYÊN TẮC MẠNG: SERVER KHÔNG KẾT NỐI GITHUB – CẤM DÙNG LỆNH GIT TRÊN SERVER
+### 0.2 ⛔ NGUYÊN TẮC MẠNG: SERVER KHÔNG KẾT NỐI GITHUB – CÁCH ĐỒNG BỘ MÃ NGUỒN
 * **Thực tế hạ tầng:**
   * Server trường `node1` **hoàn toàn KHÔNG kết nối tài khoản GitHub**, không có git credentials/ssh keys cho GitHub.
   * Mọi thao tác `git pull` hay `git clone` trên server trường đều sẽ thất bại.
-* **Quy chuẩn:**
-  * **Tuyệt đối KHÔNG gõ `git pull` hay `git clone` trên server trường**.
-  * Toàn bộ mã nguồn mới nhất được người dùng đồng bộ trực tiếp vào thư mục dự án `~/breastcancer_segmentation/`.
-  * Khi thực thi chỉ cần mở `tmux` và gọi thẳng script bash tương ứng.
+* **Quy chuẩn đồng bộ chuẩn xác (2 phương pháp):**
+
+#### Phương pháp 1: Kéo trực tiếp ngay trên terminal `node1` qua `curl` (Khuyên dùng - Nhanh nhất)
+Vì GitHub repository là Public, bạn chạy trực tiếp các lệnh sau ngay tại terminal của `node1` (`dung@node1:~/breastcancer_segmentation$`):
+```bash
+cd ~/breastcancer_segmentation
+
+# Kéo file SwinUNETR v2 3-pha (đã fix buffer):
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/train_swinunetr_v2_3phases_fold0.py -o scripts/train_swinunetr_v2_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_swinunetr_v2_3phases_server.sh -o scripts/run_swinunetr_v2_3phases_server.sh
+
+# Kéo các script 3-pha cho các mô hình tiếp theo (U-Mamba, SwinUNETR v1, PrimusV2):
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/train_umamba_3phases_fold0.py -o scripts/train_umamba_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/evaluate_umamba_3phases_fold0.py -o scripts/evaluate_umamba_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_umamba_3phases_server.sh -o scripts/run_umamba_3phases_server.sh
+
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/train_swinunetr_3phases_fold0.py -o scripts/train_swinunetr_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/evaluate_swinunetr_3phases_fold0.py -o scripts/evaluate_swinunetr_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_swinunetr_v1_3phases_server.sh -o scripts/run_swinunetr_v1_3phases_server.sh
+
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/train_primus_v2_3phases_fold0.py -o scripts/train_primus_v2_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/evaluate_primus_v2_3phases_fold0.py -o scripts/evaluate_primus_v2_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_primus_v2_3phases_server.sh -o scripts/run_primus_v2_3phases_server.sh
+
+chmod +x scripts/*.sh
+```
+
+#### Phương pháp 2: Đẩy từ máy cá nhân Windows qua SCP
+Chạy trên terminal PowerShell tại máy Windows (`D:\breastcancer_segmentation`):
+```powershell
+scp scripts/train_swinunetr_v2_3phases_fold0.py dung@node1:~/breastcancer_segmentation/scripts/
+scp scripts/run_swinunetr_v2_3phases_server.sh dung@node1:~/breastcancer_segmentation/scripts/
+```
 
 
 ### 1. 🚫 CẤM DÙNG NOTEBOOK (`.ipynb`) – 100% CHẠY QUA TERMINAL SCRIPT (`.py`)

@@ -102,28 +102,44 @@
 
 ## 4. HƯỚNG DẪN KÍCH HOẠT LỆNH TRÊN SERVER TRƯỜNG (`node1`)
 
-### Lựa chọn A: Kích hoạt từng mô hình thủ công
-
-#### Bước 1: Chạy SegMamba 3D
+### 4.0 Cập nhật mã nguồn 3 pha trực tiếp trên `node1` (via `curl`):
 ```bash
 cd ~/breastcancer_segmentation
-tmux new -s segmamba
-bash scripts/run_segmamba_server.sh
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/train_swinunetr_v2_3phases_fold0.py -o scripts/train_swinunetr_v2_3phases_fold0.py
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_swinunetr_v2_3phases_server.sh -o scripts/run_swinunetr_v2_3phases_server.sh
+chmod +x scripts/*.sh
+```
+
+### 4.1 Khởi động lại SwinUNETR v2 (3 pha) (Resume từ Epoch 50):
+```bash
+cd ~/breastcancer_segmentation
+source ~/breast_env/bin/activate
+bash scripts/run_swinunetr_v2_3phases_server.sh
 ```
 *(Bấm `Ctrl + B`, thả tay ra ấn `D` để thoát màn hình tmux, tiến trình vẫn chạy ngầm 24/7).*
 
-#### Bước 2: Chạy SwinUNETR v2 (Sau khi SegMamba xong)
+### 4.2 Kế hoạch tiếp theo sáng mai: Chạy U-Mamba Bot 3D (3 pha)
 ```bash
 cd ~/breastcancer_segmentation
-tmux new -s swinunetr_v2
-bash scripts/run_swinunetr_v2_server.sh
+tmux new -s umamba_3p
+source ~/breast_env/bin/activate
+bash scripts/run_umamba_3phases_server.sh
 ```
 
-#### Bước 3: Chạy PrimusV2-S (Sau khi SwinUNETR v2 xong)
+### 4.3 Chiều mai: Chạy SwinUNETR v1 (3 pha)
 ```bash
 cd ~/breastcancer_segmentation
-tmux new -s primus_v2
-bash scripts/run_primus_v2_server.sh
+tmux new -s swin_v1_3p
+source ~/breast_env/bin/activate
+bash scripts/run_swinunetr_v1_3phases_server.sh
+```
+
+### 4.4 Chạy PrimusV2-S (3 pha)
+```bash
+cd ~/breastcancer_segmentation
+tmux new -s primus_3p
+source ~/breast_env/bin/activate
+bash scripts/run_primus_v2_3phases_server.sh
 ```
 
 ---
