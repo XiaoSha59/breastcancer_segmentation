@@ -127,8 +127,10 @@ class FastNpyBatchSampler3Phases:
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            # Slice strictly 3 channels [:3]
-                            img_data = np.array(img_h[:3])
+                            # Slice strictly 3 channels [:3] channel-by-channel to avoid Blosc2 buffer limit
+                            img_data = np.empty((3, *shape), dtype=np.float32)
+                            for c in range(3):
+                                img_data[c] = img_h[c]
                             seg_data = np.array(seg_h[:])
                             pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
                             pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
@@ -198,8 +200,11 @@ class FastNpyBatchSampler3Phases:
                     sampled = True
                     break
                 except Exception as ex:
-                    print(f"Warning: failed sampling attempt {cid}: {ex}")
-                    continue
+                    print(f"[DATA WARNING] Case {cid} failed during sampling ({ex}). Retrying...")
+                    if cid in self.case_ids:
+                        self.case_ids.remove(cid)
+                    if cid in self.handles:
+                        self.handles.pop(cid, None)
 
             if not sampled:
                 raise RuntimeError(f"Failed to sample valid 3-phase patch after 15 attempts.")
@@ -368,7 +373,10 @@ def main():
 
                         if val_sampler.is_b2nd and val_sampler.has_blosc2 and os.path.exists(b2nd_path):
                             img_h, seg_h = val_sampler.get_case_data(cid)
-                            val_img = torch.from_numpy(np.array(img_h[:3], dtype=np.float32)).unsqueeze(0).to(device)
+                            val_arr = np.empty((3, *img_h.shape[1:]), dtype=np.float32)
+                            for c in range(3):
+                                val_arr[c] = img_h[c]
+                            val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
                             val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                         elif os.path.exists(npy_path):
                             case_data = np.load(npy_path, mmap_mode="r")
