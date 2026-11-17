@@ -101,10 +101,14 @@ def main():
     if has_raw:
         print(f"Raw Images Directory: {images_dir}")
 
+    # Cluster Safety: Strictly limit CPU threads for shared server (node1)
+    torch.set_num_threads(4)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.enabled = False
         torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
 
     model = SwinUNETR(
         in_channels=3,
