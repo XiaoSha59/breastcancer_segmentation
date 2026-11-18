@@ -30,11 +30,11 @@
 | 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **ĐANG CHẠY (GCP L4)** | *(0.4162 tại Ep 4)* | -- | GCP VM `cancer-seg-gpu` (BFloat16, tmux `segmamba`) |
 | 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | *(0.6140 tại Ep 39)* | -- | Server `node1` RTX 4090 (Ep 45+, tmux `swinunetr_v2`) |
 | 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **SẴN SÀNG (node1)** | -- | -- | Đã vá 100%, chờ SwinUNETR v2 xong để chạy tiếp |
-| 10 | **MedNeXt-L k3 (3 Phases)** | `facebookresearch/MedNeXt` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: 3 pha tự nhiên (Pre, Early, Late) |
+| 10 | **MedNeXt-L k3 (3 Phases)** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | **0.7341** | **0.7800** | `checkpoints/mednext_3phases/fold_0/checkpoint_best.pth`<br>`checkpoints/mednext_3phases/fold_0/paper_metrics_summary.txt` |
 | 11 | **Standard 3D nnU-Net (3 Phases)** | `nnU-Net v2 (Plain Conv)` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetPlans` |
 | 12 | **ResEnc-UNet L (3 Phases)** | `nnU-Net v2 / dynamic-net` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetResEncUNetLPlans` |
 
-> *Ghi chú*: Toàn bộ 6 mô hình đã hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\checkpoints\`).
+> *Ghi chú*: Toàn bộ các mô hình hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\checkpoints\`).
 
 ---
 
