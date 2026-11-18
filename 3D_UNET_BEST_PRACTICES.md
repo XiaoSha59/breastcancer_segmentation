@@ -61,6 +61,13 @@ Khi thực hiện nghiên cứu khoa học hoặc viết báo cáo học thuật
   * Cả Standard 3D nnU-Net (`nnUNetPlans`) và ResEnc-UNet L (`nnUNetResEncUNetLPlans`) trên cùng bài toán 3D fullres đều dùng chung độ phân giải và spacing mục tiêu.
   * Chỉ cần sinh file mô tả kế hoạch mạng (`nnUNetPlans.json`) mà **không cần chạy lại bước `nnUNetv2_preprocess`** nếu thư mục `nnUNetPlans_3d_fullres` đã tồn tại.
 
+### 🌟 Nghiên Cứu Bóc Tách 3 Pha (3-Phase Ablation) Cho Họ nnU-Net
+* **Thách thức:** Dữ liệu Dataset 501 có 5 kênh và chiếm 64 GB bộ nhớ đệm preprocessed. Nếu tạo thêm một dataset 3 kênh riêng biệt, máy chủ trường sẽ cạn sạch dung lượng SSD (vượt ngưỡng 82 GB trống).
+* **Giải pháp chuẩn MIC-DKFZ:** Sử dụng Trainer kế thừa `nnUNetTrainer_3phases_200epochs`:
+  * Khởi tạo mạng với `num_input_channels = 3`.
+  * Cắt lát động tensor đầu vào `batch['data'] = batch['data'][:, :3]` tại bước nạp dữ liệu.
+  * **Hiệu quả:** Tái sử dụng 100% dữ liệu 64 GB đã xử lý, tiết kiệm 0 MB ổ cứng phát sinh, đảm bảo so sánh 1:1 công bằng tuyệt đối giữa 5 pha và 3 pha.
+
 ---
 
 ## 4. Quản Lý Bộ Nhớ & Tránh Lỗi Sập RAM (OOM Crash Prevention)
