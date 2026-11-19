@@ -27,14 +27,16 @@
 | 4 | **U-Mamba Bot 3D** | `bowang-lab/U-Mamba` (MICCAI 2024) | **HOÀN TẤT** | 0.7481 | 0.8040 | `checkpoints/umamba_fold0_checkpoint_best.pth` |
 | 5 | **SwinUNETR v1** | `MONAI (SwinTransformer)` | **HOÀN TẤT** | **0.7250** | **0.7777** | `checkpoints/swinunetr_fold0_checkpoint_best.pth` |
 | 6 | **MedNeXt-L k3** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | 0.7347 | 0.7924 | `results/.../MedNeXt_L_k3_200epochs/fold_0/`<br>`checkpoints/mednext_l_k3_fold0_checkpoint_best.pth` (414 MB) |
-| 7 | **SegMamba 3D** | `ge-xing/SegMamba` (MICCAI 2024) | **ĐANG CHẠY (GCP L4)** | *(0.4162 tại Ep 4)* | -- | GCP VM `cancer-seg-gpu` (BFloat16, tmux `segmamba`) |
-| 8 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **ĐANG CHẠY (node1)** | *(0.6140 tại Ep 39)* | -- | Server `node1` RTX 4090 (Ep 45+, tmux `swinunetr_v2`) |
-| 9 | **PrimusV2-S** | `MIC-DKFZ` (Wald et al. 2024) | **SẴN SÀNG (node1)** | -- | -- | Đã vá 100%, chờ SwinUNETR v2 xong để chạy tiếp |
-| 10 | **MedNeXt-L k3 (3 Phases)** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | **0.7341** | **0.7800** | `checkpoints/mednext_3phases/fold_0/checkpoint_best.pth`<br>`checkpoints/mednext_3phases/fold_0/paper_metrics_summary.txt` |
-| 11 | **Standard 3D nnU-Net (3 Phases)** | `nnU-Net v2 (Plain Conv)` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetPlans` |
-| 12 | **ResEnc-UNet L (3 Phases)** | `nnU-Net v2 / dynamic-net` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetResEncUNetLPlans` |
+| 7 | **3D SegMamba (5 Phases)** | `ge-xing/SegMamba` (MICCAI 2024) | **HOÀN TẤT** | **0.7413** | **0.7910** | `checkpoints/segmamba_fold0_checkpoint_best.pth`<br>`checkpoints/segmamba_paper_metrics.txt` |
+| 8 | **3D SegMamba (3 Phases)** | `ge-xing/SegMamba` (MICCAI 2024) | **HOÀN TẤT** | **0.7302** | **0.7732** | GCP `SegMamba_3phases_200epochs/fold_0/`<br>Median HD95: 12.45 mm, Median ASSD: 2.98 mm |
+| 9 | **SwinUNETR v2** | `MONAI SwinUNETR (Standardized)` | **HOÀN TẤT** | 0.7232 | 0.7661 | `checkpoints/swinunetr_v2/checkpoint_best.pth` |
+| 10 | **SwinUNETR v2 (3 Phases)** | `MONAI SwinUNETR (Standardized)` | **HOÀN TẤT** | **0.7360** | -- | Server `node1` RTX 4090 (Ep 200) |
+| 11 | **MedNeXt-L k3 (3 Phases)** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | **0.7341** | **0.7800** | `checkpoints/mednext_3phases/fold_0/checkpoint_best.pth`<br>`checkpoints/mednext_3phases/fold_0/paper_metrics_summary.txt` |
+| 12 | **Standard 3D nnU-Net (3 Phases)** | `nnU-Net v2 (Plain Conv)` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetPlans` |
+| 13 | **ResEnc-UNet L (3 Phases)** | `nnU-Net v2 / dynamic-net` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetResEncUNetLPlans` |
+| 14 | **PrimusV2-S (3 Phases)** | `MIC-DKFZ` (Wald et al. 2024) | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Đã vá 100% |
 
-> *Ghi chú*: Toàn bộ các mô hình hoàn tất đều đã được kéo và lưu trữ an toàn cả file trọng số `.pth` (tốt nhất) lẫn file bảng điểm `paper_metrics_summary.txt` trên máy tính cá nhân (`D:\breastcancer_segmentation\checkpoints\`).
+> *Ghi chú*: Toàn bộ các mô hình hoàn tất đều đã được lưu trữ an toàn cả file trọng số `.pth` lẫn file bảng điểm `paper_metrics_summary.txt`.
 
 ---
 
