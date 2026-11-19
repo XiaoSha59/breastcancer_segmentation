@@ -95,8 +95,9 @@ except ImportError:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate U-Mamba Bot 3D on 3 Natural Phases (Fold 0)")
-    parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2")
-    parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
+    parser.add_argument("--prep_dir", type=str, default=None, help="Path to preprocessed nnUNetPlans_3d_fullres dir")
+    parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2", help="Path to raw NIfTI dir")
+    parser.add_argument("--splits_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_3phases_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 64])
@@ -104,88 +105,73 @@ def parse_args():
     return parser.parse_args()
 
 
-class SimpleNiftiValDataset(Dataset):
-    """Fallback Dataset when MONAI is not available."""
-    def __init__(self, val_files):
-        self.val_files = val_files
-
-    def __len__(self):
-        return len(self.val_files)
-
-    def __getitem__(self, idx):
-        item = self.val_files[idx]
-        imgs = []
-        for p in item["image"]:
-            img_itk = sitk.ReadImage(p)
-            arr = sitk.GetArrayFromImage(img_itk).astype(np.float32)  # (D, H, W)
-            # Channel-wise Z-score normalization on non-zero voxels
-            mask = arr != 0
-            if mask.sum() > 0:
-                mean = arr[mask].mean()
-                std = arr[mask].std()
-                if std > 1e-8:
-                    arr = (arr - mean) / std
-            imgs.append(arr)
-        img_tensor = torch.from_numpy(np.stack(imgs, axis=0))  # (3, D, H, W)
-
-        lbl_itk = sitk.ReadImage(item["label"])
-        lbl_arr = sitk.GetArrayFromImage(lbl_itk).astype(np.float32)
-        lbl_tensor = torch.from_numpy(lbl_arr).unsqueeze(0)  # (1, D, H, W)
-
-        return {"image": img_tensor, "label": lbl_tensor, "case_id": item["case_id"]}
-
-
 def main():
+    import pickle
     args = parse_args()
     val_out_dir = os.path.join(args.output_dir, "validation")
+    gt_out_dir = os.path.join(args.output_dir, "gt_validation")
     os.makedirs(val_out_dir, exist_ok=True)
+    os.makedirs(gt_out_dir, exist_ok=True)
 
     checkpoint_best = os.path.join(args.output_dir, "checkpoint_best.pth")
     if not os.path.exists(checkpoint_best):
         print(f"Error: {checkpoint_best} not found!")
         sys.exit(1)
 
-    with open(args.splits_file, "r") as f:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    splits_file = args.splits_file
+    if not splits_file or not os.path.isfile(splits_file):
+        candidates = [
+            os.path.join(project_root, "splits_final.json"),
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                splits_file = c
+                break
+
+    with open(splits_file, "r") as f:
         splits = json.load(f)
     val_ids = splits[args.fold]["val"]
     print(f"Loaded {len(val_ids)} validation cases for Fold {args.fold} (3 Natural Phases).")
 
+    # Resolve preprocessed data directory
+    prep_dir = args.prep_dir
+    if not prep_dir or not os.path.isdir(prep_dir):
+        candidate_preps = [
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+        ]
+        for p in candidate_preps:
+            if os.path.isdir(p):
+                prep_dir = p
+                break
+
     images_dir = os.path.join(args.data_dir, "imagesTr")
     labels_dir = os.path.join(args.data_dir, "labelsTr")
+    has_raw = os.path.isdir(images_dir) and os.path.isdir(labels_dir)
+    has_prep = prep_dir and os.path.isdir(prep_dir)
 
-    val_files = []
-    for cid in val_ids:
-        # Load first 3 Natural Phases: 0000 (Pre), 0001 (Early Peak), 0002 (Delayed Late)
-        imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(3)]
-        lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-        val_files.append({"image": imgs, "label": lbl, "case_id": cid})
+    print(f"Evaluation Data Source: {'Raw NIfTI' if has_raw else ('Preprocessed ' + str(prep_dir) if has_prep else 'Unknown')}")
 
-    if HAS_MONAI:
-        val_transforms = Compose([
-            LoadImaged(keys=["image", "label"], image_only=False),
-            EnsureChannelFirstd(keys=["label"]),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-            EnsureTyped(keys=["image", "label"]),
-        ])
-        from monai.data import Dataset as MonaiDataset
-        val_ds = MonaiDataset(data=val_files, transform=val_transforms)
-    else:
-        val_ds = SimpleNiftiValDataset(val_files)
-
-    val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
-
+    torch.set_num_threads(4)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.enabled = False
+
     model = create_umamba_bot_3d(
         in_channels=3,
         out_channels=2,
         features=[32, 64, 128, 256, 320],
-        deep_supervision=False,  # Single high-resolution output during evaluation
+        deep_supervision=False,
     ).to(device)
 
     print(f"Loading weights from {checkpoint_best}...")
     checkpoint = torch.load(checkpoint_best, map_location=device)
-    model_state = checkpoint["model_state_dict"]
-    model.load_state_dict(model_state, strict=False)
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     model.eval()
 
     patient_metrics = {}
@@ -194,14 +180,55 @@ def main():
     recall_scores = []
     precision_scores = []
 
-    print("Running sliding window inference on 197 validation cases (3 Natural Phases)...")
+    print(f"Running 3-Phase sliding window inference on {len(val_ids)} validation cases...")
     eval_start = time.time()
+    pz, py, px = args.patch_size
 
     with torch.no_grad():
-        for i, batch in enumerate(val_loader):
-            cid = batch["case_id"][0]
-            inputs = batch["image"].to(device)
-            labels = batch["label"].to(device)
+        for i, cid in enumerate(val_ids):
+            if has_raw:
+                imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(3)]
+                lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                for c in range(3):
+                    mask = img_raw[c] != 0
+                    if np.any(mask):
+                        img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
+            elif has_prep:
+                b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
+                npy_path = os.path.join(prep_dir, f"{cid}.npy")
+                if os.path.exists(b2nd_path):
+                    import blosc2
+                    img_h = blosc2.open(b2nd_path)
+                    seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
+                    val_arr = np.empty((3, *img_h.shape[1:]), dtype=np.float32)
+                    for c in range(3):
+                        val_arr[c] = img_h[c]
+                    img_raw = val_arr
+                    lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                elif os.path.exists(npy_path):
+                    case_data = np.load(npy_path, mmap_mode="r")
+                    img_raw = case_data[:3].astype(np.float32)
+                    lbl_raw = (case_data[5] > 0).astype(np.uint8)
+                else:
+                    print(f"Warning: Case {cid} not found, skipping.")
+                    continue
+            else:
+                print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
+                continue
+
+            _, orig_d, orig_h, orig_w = img_raw.shape
+            pad_d = max(0, pz - orig_d)
+            pad_h = max(0, py - orig_h)
+            pad_w = max(0, px - orig_w)
+
+            if pad_d > 0 or pad_h > 0 or pad_w > 0:
+                img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
+            else:
+                img_padded = img_raw
+
+            inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
 
             with autocast():
                 outputs = sliding_window_inference(
@@ -215,20 +242,18 @@ def main():
             prob = torch.softmax(outputs, dim=1)[:, 1:2]
             pred = (prob > 0.5).float()
 
-            pred_np = pred.squeeze().cpu().numpy().astype(np.uint8)
-            label_np = labels.squeeze().cpu().numpy().astype(np.uint8)
+            pred_np = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
+            label_np = lbl_raw[:orig_d, :orig_h, :orig_w]
 
-            intersection = np.logical_and(pred_np, label_np).sum()
-            union = np.logical_or(pred_np, label_np).sum()
+            intersection = np.logical_and(pred_np == 1, label_np == 1).sum()
+            union = np.logical_or(pred_np == 1, label_np == 1).sum()
             pred_sum = pred_np.sum()
             label_sum = label_np.sum()
 
-            if label_sum == 0 and pred_sum == 0:
+            if pred_sum + label_sum == 0:
                 dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
-            elif pred_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
-            elif label_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
+            elif pred_sum == 0 or label_sum == 0:
+                dice, iou, rec, prec = 0.0, 0.0, (1.0 if label_sum == 0 else 0.0), (1.0 if pred_sum == 0 else 0.0)
             else:
                 dice = 2.0 * intersection / (pred_sum + label_sum)
                 iou = intersection / union
@@ -241,41 +266,69 @@ def main():
             precision_scores.append(prec)
 
             patient_metrics[cid] = {
-                "Dice": float(dice),
-                "IoU": float(iou),
-                "Recall": float(rec),
-                "Precision": float(prec),
+                "dice": float(dice),
+                "iou": float(iou),
+                "recall": float(rec),
+                "precision": float(prec),
+                "pred_voxels": int(pred_sum),
+                "gt_voxels": int(label_sum),
             }
 
-            ref_path = os.path.join(labels_dir, f"{cid}.nii.gz")
-            ref_img = sitk.ReadImage(ref_path)
-            pred_img = sitk.GetImageFromArray(pred_np)
-            pred_img.SetSpacing(ref_img.GetSpacing())
-            pred_img.SetOrigin(ref_img.GetOrigin())
-            pred_img.SetDirection(ref_img.GetDirection())
-            out_nii_path = os.path.join(val_out_dir, f"{cid}.nii.gz")
-            sitk.WriteImage(pred_img, out_nii_path)
+            # Save prediction and ground truth NIfTI masks for surface calculation
+            pred_sitk = sitk.GetImageFromArray(pred_np)
+            gt_sitk = sitk.GetImageFromArray(label_np)
 
-            if (i + 1) % 25 == 0 or (i + 1) == len(val_loader):
-                print(f"[{i+1}/{len(val_loader)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
+            if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
+                ref_img = sitk.ReadImage(os.path.join(labels_dir, f"{cid}.nii.gz"))
+                pred_sitk.SetSpacing(ref_img.GetSpacing())
+                pred_sitk.SetOrigin(ref_img.GetOrigin())
+                pred_sitk.SetDirection(ref_img.GetDirection())
+                gt_sitk.SetSpacing(ref_img.GetSpacing())
+                gt_sitk.SetOrigin(ref_img.GetOrigin())
+                gt_sitk.SetDirection(ref_img.GetDirection())
+            elif prep_dir:
+                pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
+                if os.path.exists(pkl_path):
+                    with open(pkl_path, "rb") as pf:
+                        meta = pickle.load(pf)
+                    if "spacing" in meta:
+                        sp = meta["spacing"]
+                        pred_sitk.SetSpacing((float(sp[2]), float(sp[1]), float(sp[0])))
+                        gt_sitk.SetSpacing((float(sp[2]), float(sp[1]), float(sp[0])))
+
+            sitk.WriteImage(pred_sitk, os.path.join(val_out_dir, f"{cid}.nii.gz"))
+            sitk.WriteImage(gt_sitk, os.path.join(gt_out_dir, f"{cid}.nii.gz"))
+
+            del inputs, outputs, pred
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
+                print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | IoU={iou:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
 
     eval_duration = time.time() - eval_start
     print(f"Inference complete in {eval_duration:.1f}s.")
 
     summary_data = {
+        "model": "U-Mamba Bot 3D (3 Natural Phases)",
+        "fold": args.fold,
+        "num_cases": len(val_ids),
         "mean_dice": float(np.mean(dice_scores)),
         "median_dice": float(np.median(dice_scores)),
         "std_dice": float(np.std(dice_scores)),
         "mean_iou": float(np.mean(iou_scores)),
+        "median_iou": float(np.median(iou_scores)),
         "mean_recall": float(np.mean(recall_scores)),
         "mean_precision": float(np.mean(precision_scores)),
+        "inference_time_seconds": float(eval_duration),
         "cases": patient_metrics,
     }
 
-    summary_file = os.path.join(val_out_dir, "summary.json")
-    with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump(summary_data, f, indent=2)
-    print(f"Saved patient-level summary to {summary_file}")
+    # Save summary.json to both val_out_dir and args.output_dir for seamless discovery
+    for s_path in [os.path.join(val_out_dir, "summary.json"), os.path.join(args.output_dir, "summary.json")]:
+        with open(s_path, "w", encoding="utf-8") as f:
+            json.dump(summary_data, f, indent=2)
+    print(f"Saved patient-level summary to {val_out_dir}/summary.json and {args.output_dir}/summary.json")
 
     # Compute surface metrics (HD95, ASSD)
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -287,3 +340,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
