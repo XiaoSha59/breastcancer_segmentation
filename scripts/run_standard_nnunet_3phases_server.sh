@@ -33,6 +33,18 @@ echo "==========================================================================
 echo "    STANDARD 3D NNU-NET (3 NATURAL PHASES) - UNIVERSITY SERVER (NODE1)       "
 echo "=============================================================================="
 
+# GPU Collision Guard: Verify GPU is idle
+if command -v nvidia-smi &> /dev/null; then
+    TARGET_GPU="${CUDA_VISIBLE_DEVICES:-0}"
+    MEM_USED=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i "$TARGET_GPU" 2>/dev/null || echo "0")
+    if [ "$MEM_USED" -gt 2500 ]; then
+        echo "[CRITICAL SAFETY WARNING] GPU $TARGET_GPU is currently BUSY (${MEM_USED} MiB VRAM used)!"
+        echo "Please verify running jobs with nvidia-smi before proceeding."
+        exit 1
+    fi
+    echo "Verified GPU $TARGET_GPU is idle (${MEM_USED} MiB used). Safe to allocate."
+fi
+
 # Safe cleanup: terminate background jobs on interrupt, NEVER shutdown server
 cleanup() {
     EXIT_STATUS=$?
