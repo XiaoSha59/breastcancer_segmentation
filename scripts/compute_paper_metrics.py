@@ -71,9 +71,11 @@ def main():
             gt_dir = cand
             break
     summary_json = os.path.join(val_dir, "summary.json")
+    if not os.path.exists(summary_json):
+        summary_json = os.path.join(results_dir, "summary.json")
     
     if not os.path.exists(summary_json):
-        print(f"Error: {summary_json} not found!")
+        print(f"Error: summary.json not found in {val_dir} or {results_dir}!")
         return
 
     with open(summary_json, "r", encoding="utf-8") as f:
@@ -87,10 +89,23 @@ def main():
         if d is not None:
             dice_list.append(d)
     
-    dice_arr = np.array(dice_list)
-    mean_dice = float(np.mean(dice_arr))
-    sd_dice = float(np.std(dice_arr))
-    median_dice = float(np.median(dice_arr))
+    if len(dice_list) == 0:
+        if "patient_metrics" in s_data:
+            dice_list = [v.get("dice", v.get("Dice")) for v in s_data["patient_metrics"].values() if v.get("dice") is not None or v.get("Dice") is not None]
+        elif "cases" in s_data:
+            dice_list = [v.get("dice", v.get("Dice")) for v in s_data["cases"].values() if v.get("dice") is not None or v.get("Dice") is not None]
+
+    if len(dice_list) > 0:
+        dice_arr = np.array(dice_list)
+        mean_dice = float(np.mean(dice_arr))
+        sd_dice = float(np.std(dice_arr))
+        median_dice = float(np.median(dice_arr))
+    else:
+        mean_dice = float(s_data.get("mean_dice", np.nan))
+        sd_dice = float(s_data.get("std_dice", 0.0))
+        median_dice = float(s_data.get("median_dice", mean_dice))
+        dice_arr = np.array([mean_dice])
+
     
     # 2. HD95 & ASSD via multiprocessing
     pred_files = sorted(glob.glob(os.path.join(val_dir, "*.nii.gz")))
