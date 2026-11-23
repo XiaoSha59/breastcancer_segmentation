@@ -278,6 +278,10 @@ def main():
     with open(summary_file, "w") as f:
         json.dump(summary, f, indent=2)
 
+    val_summary_file = os.path.join(val_out_dir, "summary.json")
+    with open(val_summary_file, "w") as f:
+        json.dump(summary, f, indent=2)
+
     print("\n" + "=" * 60)
     print("SWINUNETR V2 (3-PHASE) EVALUATION FINISHED")
     print("=" * 60)
