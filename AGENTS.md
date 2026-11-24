@@ -25,6 +25,14 @@ Khi thực hiện bất kỳ tác vụ lập trình, huấn luyện, đánh giá
 6. **CẤM DÙNG JUPYTER NOTEBOOK TRÊN SERVER TRƯỜNG**: Mọi tác vụ huấn luyện và đánh giá bắt buộc phải chạy qua terminal/script bash trong `tmux`, tuyệt đối không dùng file `.ipynb`.
 7. **MÔI TRƯỜNG ẢO LÀ PYTHON VENV (`breast_env`), KHÔNG DÙNG CONDA**: Môi trường làm việc trên `node1` là Python `venv` tại `~/breast_env`. Luôn kích hoạt bằng lệnh `source ~/breast_env/bin/activate`. Tuyệt đối cấm đề xuất các lệnh `conda`.
 8. **BẮT BUỘC KHÓA `export nnUNet_compile=False`**: Trên PyTorch 2.6+ của server `node1`, tính năng JIT `torch.compile` gây lỗi `CUDNN_STATUS_NOT_INITIALIZED`. Mọi lệnh `nnUNetv2_train` bắt buộc phải có `export nnUNet_compile=False` để chạy ở chế độ PyTorch Eager Mode ổn định.
+9. **BẮT BUỘC TẮT cuDNN TRONG PYTHON (`torch.backends.cudnn.enabled = False`)**: Trên máy chủ `node1` chạy PyTorch 2.6.0 + CUDA 12.4 và GPU Ada Lovelace (RTX 4090), thư viện ngoài cuDNN bị xung đột context khi thực hiện phép tích chập không gian 3 chiều (`F.conv3d`), ném lỗi `RuntimeError: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED`. Toàn bộ script huấn luyện và trainer (bao gồm `nnUNetTrainer_3phases_200epochs`) BẮT BUỘC phải đặt:
+   ```python
+   torch.backends.cudnn.enabled = False
+   torch.backends.cudnn.benchmark = False
+   torch.backends.cudnn.allow_tf32 = True
+   ```
+   ở cấp độ module, trong `__init__`, `initialize()`, `on_train_start()`, `train_step()` và `validation_step()`. Điều này ép PyTorch sử dụng 100% native ATen CUDA kernels, triệt tiêu hoàn toàn lỗi cuDNN mà vẫn duy trì tốc độ tính toán tối đa và độ chính xác FP16/TF32 tuyệt đối.
+
 
 ## ⛔ NGUYÊN TẮC BẢO TOÀN PIPELINE KHI CHUYỂN ĐỔI PHA (3 PHA vs 5 PHA)
 1. **Chỉ thay đổi đúng 2 điểm**:

@@ -25,6 +25,7 @@ export PYTHONUNBUFFERED=1
 export nnUNet_n_proc_DA=4
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export nnUNet_compile=False
+export TORCH_CUDNN_V8_API_ENABLED=0
 
 # nnU-Net environment paths
 export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"

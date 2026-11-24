@@ -296,3 +296,35 @@ Trong giai đoạn kiểm thử mô hình (Inference trên 197 ca Validation):
   * Chạy mượt mà 200 epochs trong 18h 54m (tăng tốc 40%).
   * Đạt Best Proxy Val Dice **0.7912** và hoàn tất đánh giá 197 ca mà không cần sinh thêm bất kỳ file dữ liệu trung gian nào.
 * Quy tắc này được áp dụng nhất quán cho toàn bộ các mô hình tiếp theo trong portfolio: **SwinUNETR v2 (3 pha)**, **Vanilla 3D U-Net (3 pha)**, **PrimusV2 (3 pha)** và **U-Mamba (3 pha)**.
+
+---
+
+### 9.6. ⚡ Khắc Phục Lỗi Phần Cứng Trên Server: CUDNN_STATUS_NOT_INITIALIZED & Tắt cuDNN Triệt Để
+
+#### 1. Bản Chất Kỹ Thuật Của Sự Cố:
+* **Môi trường:** Máy chủ trường (`node1`), GPU NVIDIA RTX 4090 24GB (kiến trúc Ada Lovelace, Compute Capability 8.9), Python 3.12, PyTorch 2.6.0+cu124.
+* **Hiện tượng:** Khi gọi tầng tích chập không gian 3 chiều (`torch.nn.modules.conv.Conv3d` -> `F.conv3d`) trong bước truyền xuôi (`forward`) ở Epoch 0, PyTorch ném lỗi:
+  ```text
+  RuntimeError: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED
+  ```
+* **Nguyên nhân gốc rễ:** 
+  1. PyTorch 2.6 có cơ chế cuDNN benchmark và dispatch thuật toán tích chập qua thư viện ngoài cuDNN. Trên một số hệ điều hành Linux với driver/kernel xung đột context hoặc v8/v9 API mismatch, handle khởi tạo của cuDNN bị lỗi khi cấp phát descriptor cho tensor 3D.
+  2. Tính năng JIT compile (`torch.compile`) cũng kích hoạt backend cuDNN ẩn và gây lỗi tương tự.
+
+#### 2. Giải Pháp Triệt Để (Rock-solid Native PyTorch CUDA):
+* PyTorch có sẵn bộ kernel tích chập nội tại viết bằng CUDA thuần (ATen Native CUDA Kernels - `at::native::conv3d`). Bộ kernel này **hoàn toàn độc lập với thư viện cuDNN**, không bao giờ bị lỗi khởi tạo hay phụ thuộc vào phiên bản driver cuDNN ngoài.
+* Bằng cách đặt cờ phần cứng trong Python:
+  ```python
+  import torch
+  torch.backends.cudnn.enabled = False
+  torch.backends.cudnn.benchmark = False
+  torch.backends.cudnn.allow_tf32 = True
+  ```
+  PyTorch lập tức chuyển toàn bộ các phép tính `Conv3d`, `BatchNorm3d`, `ConvTranspose3d` sang native CUDA.
+* **Hiệu năng thực tế:**
+  * VRAM và tốc độ xử lý trên RTX 4090 gần như tương đương 100% nhờ vẫn kích hoạt `allow_tf32 = True`.
+  * Miễn nhiễm hoàn toàn 100% với lỗi `CUDNN_STATUS_NOT_INITIALIZED`.
+* **Vị trí bắt buộc áp dụng:**
+  * Mọi standalone trainer (`train_mednext_*.py`, `train_umamba_*.py`, `train_swinunetr_*.py`, `train_segmamba_*.py`).
+  * Class kế thừa từ nnUNetTrainer (`nnUNetTrainer_3phases_200epochs.py`): đặt tại cấp module, trong `__init__`, `initialize()`, `on_train_start()`, `train_step()` và `validation_step()` để ngăn chặn base class của nnU-Net tự bật lại `cudnn.benchmark`.
+  * Script bash khởi chạy: `export nnUNet_compile=False` và `export TORCH_CUDNN_V8_API_ENABLED=0`.

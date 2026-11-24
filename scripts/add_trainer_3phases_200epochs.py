@@ -17,6 +17,12 @@ import sys
 TRAINER_CODE = '''import os
 os.environ["nnUNet_compile"] = "False"
 import torch
+# Disable cuDNN to prevent CUDNN_STATUS_NOT_INITIALIZED on node1 (PyTorch 2.6 Ada Lovelace)
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.allow_tf32 = True
+
+import numpy as np
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.plans_handling.plans_handler import ConfigurationManager, PlansManager
 from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
@@ -30,9 +36,15 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
     - 100% REUSES existing 64GB Dataset501_BreastDCE_ISPY2 preprocessed data without duplicating files.
     - Zero disk duplication, zero auto-shutdown.
     - Compatible with BOTH Standard 3D nnU-Net (-p nnUNetPlans) and ResEnc-UNet L (-p nnUNetResEncUNetLPlans).
+    - Hardware safety: cuDNN disabled globally to avoid CUDNN_STATUS_NOT_INITIALIZED on PyTorch 2.6 node1.
     """
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
                  device: torch.device = torch.device('cuda')):
+        # Strictly enforce native CUDA execution
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.allow_tf32 = True
+
         # Restrict channel_names in dataset_json to 3 natural phases:
         # 0: Pre-contrast (I_0), 1: Early post-contrast (I_e), 2: Late post-contrast (I_l)
         if "channel_names" in dataset_json:
@@ -46,10 +58,13 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         self.num_epochs = 200
 
     def initialize(self):
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
         super().initialize()
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
         # Wrap dataset_class so load_case always returns only 3 natural phases [:3]
         base_dataset_cls = self.dataset_class
-        import numpy as np
 
         class nnUNetDataset3Phases(base_dataset_cls):
             def load_case(self, identifier):
@@ -58,6 +73,17 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
                 return np.ascontiguousarray(data[:3]), seg, seg_prev, properties
 
         self.dataset_class = nnUNetDataset3Phases
+
+    def on_train_start(self):
+        super().on_train_start()
+        # Guarantee cuDNN remains disabled even if base trainer toggles benchmark
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
+
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
 
     @staticmethod
     def build_network_architecture(plans_manager: PlansManager,
@@ -77,11 +103,13 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         )
 
     def train_step(self, batch: dict) -> dict:
+        torch.backends.cudnn.enabled = False
         if batch['data'].shape[1] > 3:
             batch['data'] = batch['data'][:, :3].contiguous()
         return super().train_step(batch)
 
     def validation_step(self, batch: dict) -> dict:
+        torch.backends.cudnn.enabled = False
         if batch['data'].shape[1] > 3:
             batch['data'] = batch['data'][:, :3].contiguous()
         return super().validation_step(batch)
