@@ -24,6 +24,8 @@ export VECLIB_MAXIMUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export nnUNet_n_proc_DA=4
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export nnUNet_compile=False
+export TORCH_CUDNN_V8_API_ENABLED=0
 
 # nnU-Net environment paths
 export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"
@@ -64,6 +66,9 @@ elif [ -d "$nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullre
 else
     PREPROCESSED_DIR="$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
 fi
+
+export nnUNet_preprocessed="$(dirname "$PREPROCESSED_DIR")"
+mkdir -p "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2" 2>/dev/null || true
 
 RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_3phases_200epochs__nnUNetPlans__3d_fullres/fold_0"
 mkdir -p "$RESULTS_DIR"
