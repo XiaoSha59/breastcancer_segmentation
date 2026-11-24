@@ -154,6 +154,26 @@ scp scripts/run_swinunetr_v2_3phases_server.sh dung@node1:~/breastcancer_segment
 * **Bảo đảm an toàn trong code:**
   * Các file `scripts/run_mednext_fold0.sh` và `scripts/run_umamba_fold0.sh` đã được gỡ bỏ 100% lệnh tắt máy. Sau khi train và evaluate xong 197 ca, server sẽ giữ nguyên trạng thái hoạt động bình thường.
 
+### 8. ⚡ BẮT BUỘC KHAI BÁO 'export nnUNet_compile=False' CHO HỌ NNUNET TRÊN PYTORCH 2.6
+* **Bài học xương máu từ thực tế:**
+  * Trong `nnUNet v2`, mặc định trên PyTorch 2.0+ hệ thống sẽ tự động kích hoạt `torch.compile` (`nnUNet_compile=True`).
+  * Trên server trường `node1` sử dụng **PyTorch 2.6 + CUDA 12.4**, tính năng JIT compiler của Inductor xung đột với driver cuDNN trong các tiến trình con, gây ra lỗi nghiêm trọng: `RuntimeError: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED` ngay tại `train_step`.
+  * **Giải pháp bắt buộc**: Trong mọi script bash chạy `nnUNetv2_train` (Standard nnU-Net, ResEnc-UNet), luôn phải khai báo:
+    ```bash
+    export nnUNet_compile=False
+    ```
+    Lệnh này ép mô hình chạy ở chế độ **PyTorch Eager Mode chuẩn mực** (như U-Mamba và SwinUNETR), ổn định 100% và không bao giờ bị lỗi cuDNN.
+
+### 9. 📁 QUY TẮC BẢO ĐẢM FILE PLANS RIÊNG BIỆT (nnUNetResEncUNetLPlans.json)
+* **Vấn đề khi chuyển dữ liệu từ GCP sang node1:**
+  * Khi copy dữ liệu preprocessed sang `node1`, thư mục chỉ có sẵn file `nnUNetPlans.json` (dùng chung cho Standard nnU-Net, U-Mamba, MedNeXt).
+  * Mô hình **ResEnc-UNet L** sử dụng file cấu hình kiến trúc riêng biệt là `nnUNetResEncUNetLPlans.json` (9.2 KB). Nếu thiếu file này, lệnh train sẽ văng lỗi `FileNotFoundError`.
+  * Biến môi trường `nnUNet_preprocessed` phải luôn trỏ chính xác về thư mục cha chứa dataset:
+    ```bash
+    export nnUNet_preprocessed="$HOME/breastcancer_segmentation/data/preprocessed"
+    ```
+  * File `scripts/nnUNetResEncUNetLPlans.json` đã được lưu trữ sẵn trong repository để tự động nạp vào thư mục dữ liệu trước khi train.
+
 ---
 
 ## 🚀 PHẦN 2: CHECKLIST CÁC LỆNH KIỂM TRA TRƯỚC KHI CHẠY (PRE-FLIGHT)

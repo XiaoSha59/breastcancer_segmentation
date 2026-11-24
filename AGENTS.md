@@ -24,6 +24,7 @@ Khi thực hiện bất kỳ tác vụ lập trình, huấn luyện, đánh giá
 5. **CẤM DÙNG GIT TRÊN SERVER TRƯỜNG (`node1`)**: Máy chủ `node1` **hoàn toàn KHÔNG kết nối tài khoản GitHub**, không thể và không được phép chạy `git pull` hay `git clone`. Mọi file mã nguồn được đồng bộ trực tiếp qua SCP hoặc do người dùng tự tải vào server. Tuyệt đối cấm AI hướng dẫn chạy lệnh git trên máy trường.
 6. **CẤM DÙNG JUPYTER NOTEBOOK TRÊN SERVER TRƯỜNG**: Mọi tác vụ huấn luyện và đánh giá bắt buộc phải chạy qua terminal/script bash trong `tmux`, tuyệt đối không dùng file `.ipynb`.
 7. **MÔI TRƯỜNG ẢO LÀ PYTHON VENV (`breast_env`), KHÔNG DÙNG CONDA**: Môi trường làm việc trên `node1` là Python `venv` tại `~/breast_env`. Luôn kích hoạt bằng lệnh `source ~/breast_env/bin/activate`. Tuyệt đối cấm đề xuất các lệnh `conda`.
+8. **BẮT BUỘC KHÓA `export nnUNet_compile=False`**: Trên PyTorch 2.6+ của server `node1`, tính năng JIT `torch.compile` gây lỗi `CUDNN_STATUS_NOT_INITIALIZED`. Mọi lệnh `nnUNetv2_train` bắt buộc phải có `export nnUNet_compile=False` để chạy ở chế độ PyTorch Eager Mode ổn định.
 
 ## ⛔ NGUYÊN TẮC BẢO TOÀN PIPELINE KHI CHUYỂN ĐỔI PHA (3 PHA vs 5 PHA)
 1. **Chỉ thay đổi đúng 2 điểm**:

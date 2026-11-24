@@ -141,7 +141,6 @@ Khi kế thừa class `nnUNetTrainer` để tạo trainer tùy biến (ví dụ 
 * **Nguyên nhân bên dưới:** Bên trong `nnUNetTrainer.__init__`, tác giả nnU-Net dùng cơ chế nội soi (reflection):
   `inspect.signature(self.__class__.__init__).parameters` để lấy tên các tham số rồi truy xuất trực tiếp qua từ điển `locals()[k]`.
   Khi ta dùng `*args, **kwargs`, bộ duyệt tìm thấy biến có tên là `'args'` và tra cứu `locals()['args']` $\to$ Gây lỗi văng chương trình: `KeyError: 'args'`!
-* **✅ Quy chuẩn chuẩn hóa (Best Practice):** Bắt buộc phải khai báo danh sách tham số **tường minh 100%**:
   ```python
   class nnUNetTrainer_Vanilla3DUNet_200epochs(nnUNetTrainerNoDeepSupervision):
       def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -149,6 +148,46 @@ Khi kế thừa class `nnUNetTrainer` để tạo trainer tùy biến (ví dụ 
           super().__init__(plans, configuration, fold, dataset_json, device)
           self.enable_deep_supervision = False
           self.num_epochs = 200
+  ```
+
+### ⚠️ Bài Học Xương Máu: Lỗi `CUDNN_STATUS_NOT_INITIALIZED` Do `torch.compile` Mặc Định
+* **Hiện tượng:** Khi chạy `nnUNetv2_train` trên PyTorch 2.6+ (ví dụ máy chủ trường `node1`), log in ra dòng `Unable to plot network architecture: nnUNet_compile is enabled!` và ngay tại `Epoch 0`, chương trình văng lỗi crash: `RuntimeError: cuDNN error: CUDNN_STATUS_NOT_INITIALIZED`.
+* **Nguyên nhân:** Trên PyTorch 2.0+, `nnUNetTrainer` tự động kích hoạt `torch.compile` (`nnUNet_compile=True`). Trình biên dịch JIT Inductor gọi kernel `extern_kernels.convolution` trong tiến trình con và bị xung đột khởi tạo với driver cuDNN của hệ điều hành.
+* **✅ Quy chuẩn chuẩn hóa (Best Practice):** Luôn khóa tính năng biên dịch JIT để chạy ở chế độ **PyTorch Eager Mode chuẩn mực** (vừa ổn định 100%, vừa triệt tiêu lỗi cuDNN):
+  ```bash
+  export nnUNet_compile=False
+  ```
+  Đồng thời trong file Python của Trainer tùy biến, đặt ngay ở đầu file:
+  ```python
+  import os
+  os.environ["nnUNet_compile"] = "False"
+  ```
+
+### ⚠️ Bài Học Xương Máu: Lỗi Override `build_network_architecture`
+* **Sai lầm phổ biến:** Nhầm lẫn hàm khởi tạo mạng là phương thức của `PlansManager`:
+  ```python
+  # ❌ SAI: plans_manager không có hàm này -> Gây AttributeError: 'PlansManager' object has no attribute 'get_network_architecture'
+  return plans_manager.get_network_architecture(...)
+  ```
+* **✅ Quy chuẩn chuẩn hóa (Best Practice):** Phải import và gọi trực tiếp hàm `get_network_from_plans` từ utilities của `nnunetv2`:
+  ```python
+  from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
+
+  @staticmethod
+  def build_network_architecture(plans_manager: PlansManager,
+                                 configuration_manager: ConfigurationManager,
+                                 num_input_channels: int,
+                                 num_output_channels: int,
+                                 enable_deep_supervision: bool = True) -> torch.nn.Module:
+      return get_network_from_plans(
+          configuration_manager.network_arch_class_name,
+          configuration_manager.network_arch_init_kwargs,
+          configuration_manager.network_arch_init_kwargs_req_import,
+          num_input_channels,
+          num_output_channels,
+          allow_init=True,
+          deep_supervision=enable_deep_supervision
+      )
   ```
 
 ---
