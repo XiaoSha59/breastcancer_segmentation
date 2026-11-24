@@ -15,6 +15,7 @@ import shutil
 import sys
 
 TRAINER_CODE = '''import os
+os.environ["nnUNet_compile"] = "False"
 import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.plans_handling.plans_handler import ConfigurationManager, PlansManager

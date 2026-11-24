@@ -24,6 +24,7 @@ export VECLIB_MAXIMUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export nnUNet_n_proc_DA=4
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export nnUNet_compile=False
 
 # nnU-Net environment paths
 export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"

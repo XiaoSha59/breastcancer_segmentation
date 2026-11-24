@@ -1,4 +1,5 @@
 import os
+os.environ["nnUNet_compile"] = "False"
 import torch
 import numpy as np
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
