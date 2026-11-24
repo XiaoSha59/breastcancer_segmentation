@@ -55,13 +55,16 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
                 "2": dataset_json["channel_names"].get("2", "late"),
             }
 
-        # VRAM Safeguard for 24GB RTX 4090: enforce batch_size <= 2 to prevent CUDA OOM
+        # VRAM Safeguard for 24GB RTX 4090: enforce batch_size <= 2 and patch_size <= [192, 192, 64]
         if "configurations" in plans and configuration in plans["configurations"]:
-            if plans["configurations"][configuration].get("batch_size", 1) > 2:
-                plans = dict(plans)
-                plans["configurations"] = dict(plans["configurations"])
-                plans["configurations"][configuration] = dict(plans["configurations"][configuration])
-                plans["configurations"][configuration]["batch_size"] = 2
+            plans = dict(plans)
+            plans["configurations"] = dict(plans["configurations"])
+            cfg = dict(plans["configurations"][configuration])
+            if cfg.get("batch_size", 1) > 2:
+                cfg["batch_size"] = 2
+            if cfg.get("patch_size", [0, 0, 0])[0] > 192:
+                cfg["patch_size"] = [192, 192, 64]
+            plans["configurations"][configuration] = cfg
 
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.num_epochs = 200
