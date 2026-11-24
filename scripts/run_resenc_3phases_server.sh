@@ -65,6 +65,24 @@ else
     PREPROCESSED_DIR="$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2"
 fi
 
+# Ensure nnUNet_preprocessed environment variable points to parent of PREPROCESSED_DIR
+export nnUNet_preprocessed="$(dirname "$PREPROCESSED_DIR")"
+echo "Exported nnUNet_preprocessed to: $nnUNet_preprocessed"
+
+# Also ensure fallback path $HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2 has symlink or plans
+mkdir -p "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2" 2>/dev/null || true
+
+# Deploy nnUNetResEncUNetLPlans.json if missing
+if [ ! -f "$PREPROCESSED_DIR/nnUNetResEncUNetLPlans.json" ]; then
+    if [ -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" ]; then
+        cp "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$PREPROCESSED_DIR/nnUNetResEncUNetLPlans.json"
+        echo "Deployed nnUNetResEncUNetLPlans.json to $PREPROCESSED_DIR"
+    fi
+fi
+if [ -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" ]; then
+    cp "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetResEncUNetLPlans.json" 2>/dev/null || true
+fi
+
 RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_3phases_200epochs__nnUNetResEncUNetLPlans__3d_fullres/fold_0"
 mkdir -p "$RESULTS_DIR"
 
@@ -75,6 +93,8 @@ elif [ -f "$PROJECT_DIR/splits_final.json" ]; then
     cp "$PROJECT_DIR/splits_final.json" "$PREPROCESSED_DIR/splits_final.json"
     echo "Restored splits_final.json from project directory."
 fi
+# Ensure splits_final.json also exists in fallback
+cp "$PREPROCESSED_DIR/splits_final.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json" 2>/dev/null || true
 
 echo "=== STEP 2: REGISTER 3-PHASE TRAINER INTO NNUNETV2 ==="
 python3 "$SCRIPT_DIR/add_trainer_3phases_200epochs.py"
