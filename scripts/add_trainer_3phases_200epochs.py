@@ -43,11 +43,6 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.num_epochs = 200
 
-        # Optimization: Enable TF32 on RTX 4090 Tensor Cores (15-20% speedup with zero precision loss)
-        if torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-
     def initialize(self):
         super().initialize()
         # Wrap dataset_class so load_case always returns only 3 natural phases [:3]
