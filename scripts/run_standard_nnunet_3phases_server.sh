@@ -68,7 +68,17 @@ else
 fi
 
 export nnUNet_preprocessed="$(dirname "$PREPROCESSED_DIR")"
+echo "Exported nnUNet_preprocessed to: $nnUNet_preprocessed"
+
+# Also ensure fallback path $HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2 has symlink or plans
 mkdir -p "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2" 2>/dev/null || true
+
+# Deploy nnUNetPlans.json (batch_size=2, patch_size=[192, 192, 64])
+if [ -f "$SCRIPT_DIR/nnUNetPlans.json" ]; then
+    cp -f "$SCRIPT_DIR/nnUNetPlans.json" "$PREPROCESSED_DIR/nnUNetPlans.json"
+    cp -f "$SCRIPT_DIR/nnUNetPlans.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans.json" 2>/dev/null || true
+    echo "Deployed nnUNetPlans.json (batch_size=2, patch_size=[192, 192, 64]) to $PREPROCESSED_DIR"
+fi
 
 RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_3phases_200epochs__nnUNetPlans__3d_fullres/fold_0"
 mkdir -p "$RESULTS_DIR"
@@ -80,6 +90,7 @@ elif [ -f "$PROJECT_DIR/splits_final.json" ]; then
     cp "$PROJECT_DIR/splits_final.json" "$PREPROCESSED_DIR/splits_final.json"
     echo "Restored splits_final.json from project directory."
 fi
+cp "$PREPROCESSED_DIR/splits_final.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json" 2>/dev/null || true
 
 echo "=== STEP 2: REGISTER 3-PHASE TRAINER INTO NNUNETV2 ==="
 python3 "$SCRIPT_DIR/add_trainer_3phases_200epochs.py"
