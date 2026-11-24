@@ -18,6 +18,7 @@ TRAINER_CODE = '''import os
 import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.plans_handling.plans_handler import ConfigurationManager, PlansManager
+from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
 
 
 class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
@@ -64,13 +65,14 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
                                    num_output_channels: int,
                                    enable_deep_supervision: bool = True) -> torch.nn.Module:
         # Strictly enforce 3 input channels for the 3 natural phases ablation
-        return plans_manager.get_network_architecture(
-            architecture_class_name=configuration_manager.network_arch_class_name,
-            arch_init_kwargs=configuration_manager.network_arch_init_kwargs,
-            arch_init_kwargs_req_import=configuration_manager.network_arch_init_kwargs_req_import,
-            num_input_channels=3,
-            num_output_channels=num_output_channels,
-            enable_deep_supervision=enable_deep_supervision
+        return get_network_from_plans(
+            configuration_manager.network_arch_class_name,
+            configuration_manager.network_arch_init_kwargs,
+            configuration_manager.network_arch_init_kwargs_req_import,
+            3,
+            num_output_channels,
+            allow_init=True,
+            deep_supervision=enable_deep_supervision
         )
 
     def train_step(self, batch: dict) -> dict:
