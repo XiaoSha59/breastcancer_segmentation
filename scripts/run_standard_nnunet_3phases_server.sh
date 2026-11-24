@@ -16,13 +16,14 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Resource Allocation for node1 / lab server
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
-export OPENBLAS_NUM_THREADS=4
-export NUMEXPR_NUM_THREADS=4
-export VECLIB_MAXIMUM_THREADS=4
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export nnUNet_n_proc_DA=4
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 # nnU-Net environment paths
 export nnUNet_raw="${nnUNet_raw:-$HOME/nnUNet_raw}"
