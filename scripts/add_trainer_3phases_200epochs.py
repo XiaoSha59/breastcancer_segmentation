@@ -97,8 +97,13 @@ def register_trainer():
     os.makedirs(trainer_dir, exist_ok=True)
     trainer_file = os.path.join(trainer_dir, "nnUNetTrainer_3phases_200epochs.py")
 
-    with open(trainer_file, "w", encoding="utf-8") as f:
-        f.write(TRAINER_CODE)
+    local_trainer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nnUNetTrainer_3phases_200epochs.py")
+    if os.path.exists(local_trainer):
+        shutil.copy2(local_trainer, trainer_file)
+        print(f"Copied standalone trainer from: {local_trainer}")
+    else:
+        with open(trainer_file, "w", encoding="utf-8") as f:
+            f.write(TRAINER_CODE)
     print(f"Successfully registered nnUNetTrainer_3phases_200epochs at:\n  {trainer_file}")
 
     # Clear __pycache__ in variants and parent to ensure clean dynamic discovery

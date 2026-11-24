@@ -54,6 +54,7 @@ curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/
 curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_primus_v2_3phases_server.sh -o scripts/run_primus_v2_3phases_server.sh
 
 # Kéo các script 3-pha cho họ nnU-Net (Standard 3D nnU-Net và ResEnc-UNet L):
+curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/nnUNetTrainer_3phases_200epochs.py -o scripts/nnUNetTrainer_3phases_200epochs.py
 curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/add_trainer_3phases_200epochs.py -o scripts/add_trainer_3phases_200epochs.py
 curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_standard_nnunet_3phases_server.sh -o scripts/run_standard_nnunet_3phases_server.sh
 curl -sSL https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts/run_resenc_3phases_server.sh -o scripts/run_resenc_3phases_server.sh
