@@ -328,3 +328,23 @@ Trong giai đoạn kiểm thử mô hình (Inference trên 197 ca Validation):
   * Mọi standalone trainer (`train_mednext_*.py`, `train_umamba_*.py`, `train_swinunetr_*.py`, `train_segmamba_*.py`).
   * Class kế thừa từ nnUNetTrainer (`nnUNetTrainer_3phases_200epochs.py`): đặt tại cấp module, trong `__init__`, `initialize()`, `on_train_start()`, `train_step()` và `validation_step()` để ngăn chặn base class của nnU-Net tự bật lại `cudnn.benchmark`.
   * Script bash khởi chạy: `export nnUNet_compile=False` và `export TORCH_CUDNN_V8_API_ENABLED=0`.
+
+---
+
+### 9.7. 💾 Giới Hạn Batch Size Trên RTX 4090 24GB: Cố Định Batch Size = 2 (Tránh Tràn VRAM)
+
+#### 1. Bài Học Xương Máu Về Cấu Hình Plan Gốc Từ GCP (A100 vs RTX 4090):
+* File `nnUNetResEncUNetLPlans.json` trích xuất từ checkpoint gốc GCP được cấu hình chạy trên card máy chủ đám mây A100 (40GB / 80GB VRAM) với **`batch_size = 3`** và kích thước patch khổng lồ `[256, 256, 80]`.
+* Khi đưa nguyên bản file plan này sang card **RTX 4090 (24GB VRAM)**:
+  * ResEnc-UNet L có tới 7 tầng, 320 kênh đặc trưng và các khối Residual sâu.
+  * Với `batch_size = 3`, bộ nhớ kích hoạt (activation maps) cho 3 patch `256 x 256 x 80` vượt quá 28 GB, dẫn đến lỗi:
+    ```text
+    torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 16.88 GiB. GPU 0 has a total capacity of 23.64 GiB...
+    ```
+
+#### 2. Quy Chuẩn Bắt Buộc:
+* Toàn bộ các mô hình phân đoạn 3D trên RTX 4090 24GB trong dự án (MedNeXt-L, SwinUNETR v2, U-Mamba, SegMamba, PrimusV2) **bắt buộc chạy với `batch_size = 2`**.
+* Với `batch_size = 2`, VRAM tiêu thụ chỉ vào khoảng **11 – 12 GB**, chừa lại hơn 12 GB vùng đệm an toàn tuyệt đối.
+* Cơ chế bảo vệ 2 lớp:
+  1. File `scripts/nnUNetResEncUNetLPlans.json`: gán cố định `"batch_size": 2`.
+  2. Trainer `nnUNetTrainer_3phases_200epochs`: trong `__init__`, tự động kiểm tra và cưỡng chế `batch_size <= 2` bất kể file plan nạp vào có giá trị nào.

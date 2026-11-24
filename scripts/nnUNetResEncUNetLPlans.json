@@ -179,7 +179,7 @@
     "3d_fullres": {
       "data_identifier": "nnUNetPlans_3d_fullres",
       "preprocessor_name": "DefaultPreprocessor",
-      "batch_size": 3,
+      "batch_size": 2,
       "patch_size": [
         256,
         256,

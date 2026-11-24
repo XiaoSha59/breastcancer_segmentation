@@ -74,15 +74,11 @@ echo "Exported nnUNet_preprocessed to: $nnUNet_preprocessed"
 # Also ensure fallback path $HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2 has symlink or plans
 mkdir -p "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2" 2>/dev/null || true
 
-# Deploy nnUNetResEncUNetLPlans.json if missing
-if [ ! -f "$PREPROCESSED_DIR/nnUNetResEncUNetLPlans.json" ]; then
-    if [ -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" ]; then
-        cp "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$PREPROCESSED_DIR/nnUNetResEncUNetLPlans.json"
-        echo "Deployed nnUNetResEncUNetLPlans.json to $PREPROCESSED_DIR"
-    fi
-fi
+# Deploy updated nnUNetResEncUNetLPlans.json (enforce batch_size=2 for 24GB RTX 4090)
 if [ -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" ]; then
-    cp "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetResEncUNetLPlans.json" 2>/dev/null || true
+    cp -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$PREPROCESSED_DIR/nnUNetResEncUNetLPlans.json"
+    cp -f "$SCRIPT_DIR/nnUNetResEncUNetLPlans.json" "$HOME/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetResEncUNetLPlans.json" 2>/dev/null || true
+    echo "Deployed updated nnUNetResEncUNetLPlans.json (batch_size=2) to $PREPROCESSED_DIR"
 fi
 
 RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/nnUNetTrainer_3phases_200epochs__nnUNetResEncUNetLPlans__3d_fullres/fold_0"
