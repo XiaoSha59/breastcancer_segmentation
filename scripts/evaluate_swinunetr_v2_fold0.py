@@ -2,13 +2,13 @@
 """
 evaluate_swinunetr_v2_fold0.py
 ==============================
-Unified & Bulletproof Sliding-Window Inference & Full Evaluation for SwinUNETR V2 on Fold 0 (197 Val Cases).
-Compliant with 3D_UNET_BEST_PRACTICES.md & Official nnU-Net Protocol:
-1. Evaluates directly on preprocessed nnUNetPlans_3d_fullres (.b2nd / .npy) in resampled model space.
-2. Automatically pads volumes if any dimension < patch_size [96, 96, 96], then unpads to original size.
-3. Applies Gaussian importance weighting (mode='gaussian') matching nnU-Net's seamless patch fusion.
-4. Restores physical geometry headers from metadata (.pkl) to export clean prediction & ground-truth NIfTI masks.
-5. Computes Dice, IoU, Precision, Recall and triggers compute_paper_metrics.py to calculate HD95 & ASSD.
+Sliding-Window Inference & Full 197-Case Evaluation for SwinUNETR v2 on 5 DCE-MRI Phases.
+Features:
+1. Full 5 Phases input: Channel 0 (Pre), 1 (Peak Early), 2 (Delayed Late), 3 (Sub 1), 4 (Sub 2).
+2. Uses in_channels=5, out_channels=2, feature_size=48, downsample="mergingv2", use_v2=True.
+3. Optimal patch size: 160x160x64 (auto-aligned to (X, Y, Z) array order).
+4. Slices strictly 5 channels from Blosc2 (.b2nd) without buffer fragmentation.
+5. Computes Mean/Median Dice, IoU, Precision, Recall and triggers compute_paper_metrics.py for HD95 & ASSD.
 """
 
 import os
@@ -20,20 +20,23 @@ import pickle
 import numpy as np
 import SimpleITK as sitk
 import torch
-from torch.cuda.amp import autocast
 
-import monai
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
 from monai.networks.nets import SwinUNETR
 from monai.inferers import sliding_window_inference
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate SwinUNETR V2 on I-SPY2 Fold 0")
+    parser = argparse.ArgumentParser(description="Evaluate SwinUNETR V2 on 5 DCE-MRI Phases (Fold 0)")
     parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2")
     parser.add_argument("--prep_dir", type=str, default="", help="Path to preprocessed nnUNetPlans_3d_fullres folder")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64], help="Optimal 3D patch size for RTX 4090 24GB on breast DCE-MRI")
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64])
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()
@@ -44,11 +47,10 @@ def main():
     # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
     if args.patch_size[0] < args.patch_size[2]:
         args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
-        print(f"Auto-aligned patch_size to array order (X, Y, Z): {args.patch_size}")
 
     # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_opt_200epochs", f"fold_{args.fold}")
 
     val_out_dir = os.path.join(args.output_dir, "validation")
@@ -78,7 +80,6 @@ def main():
     print(f"Loaded {len(val_ids)} validation cases for Fold {args.fold}.")
 
     # Resolve preprocessed data directory
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.prep_dir and os.path.isdir(args.prep_dir):
         prep_dir = args.prep_dir
     else:
@@ -110,6 +111,7 @@ def main():
         torch.backends.cudnn.enabled = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = True
+
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
@@ -131,7 +133,7 @@ def main():
     recall_scores = []
     precision_scores = []
 
-    print(f"Running sliding window inference on {len(val_ids)} validation cases...")
+    print(f"Running 5-Phase sliding window inference on {len(val_ids)} validation cases...")
     eval_start = time.time()
     pz, py, px = args.patch_size
 
@@ -139,6 +141,7 @@ def main():
         for i, cid in enumerate(val_ids):
             try:
                 if has_raw:
+                    # Load all 5 Phases: 0000 (Pre), 0001 (Early Peak), 0002 (Delayed Late), 0003 (Sub 1), 0004 (Sub 2)
                     imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
                     lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
                     img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
@@ -154,23 +157,20 @@ def main():
                         import blosc2
                         img_h = blosc2.open(b2nd_path)
                         seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                        n_chans = min(5, img_h.shape[0])
-                        val_arr = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
-                        for c in range(n_chans):
+                        val_arr = np.empty((5, *img_h.shape[1:]), dtype=np.float32)
+                        for c in range(5):
                             try:
                                 val_arr[c] = img_h[c]
                             except Exception:
-                                # Fallback for oversized 3D volume: read slice-by-slice along Z dimension
                                 for z in range(img_h.shape[1]):
                                     val_arr[c, z] = img_h[c, z]
                         img_raw = val_arr
                         try:
                             lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
                         except Exception:
-                            lbl_buf = np.empty(seg_h.shape[1:], dtype=np.int16)
+                            lbl_raw = np.empty(seg_h.shape[1:], dtype=np.uint8)
                             for z in range(seg_h.shape[1]):
-                                lbl_buf[z] = seg_h[0, z]
-                            lbl_raw = (lbl_buf > 0).astype(np.uint8)
+                                lbl_raw[z] = (seg_h[0, z] > 0).astype(np.uint8)
                     elif os.path.exists(npy_path):
                         case_data = np.load(npy_path, mmap_mode="r")
                         img_raw = case_data[:5].astype(np.float32)
@@ -182,186 +182,132 @@ def main():
                     print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                     continue
 
-                # Original dimensions: C, D, H, W
-                _, orig_d, orig_h, orig_w = img_raw.shape
+                # Prepare tensor for inference (shape: 1, 5, D, H, W)
+                img_tensor = torch.from_numpy(img_raw).unsqueeze(0).to(device)
 
-                # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
-                pad_d = max(0, pz - orig_d)
-                pad_h = max(0, py - orig_h)
-                pad_w = max(0, px - orig_w)
+                # Dynamic sliding window inference
+                window_size = (min(pz, img_tensor.shape[2]), min(py, img_tensor.shape[3]), min(px, img_tensor.shape[4]))
+                # Ensure window dimensions are divisible by 32 for SwinUNETR v2 hierarchical stages
+                window_size = tuple(max(32, (dim // 32) * 32) for dim in window_size)
 
-                if pad_d > 0 or pad_h > 0 or pad_w > 0:
-                    img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
+                logits = sliding_window_inference(
+                    inputs=img_tensor,
+                    roi_size=window_size,
+                    sw_batch_size=2,
+                    predictor=model,
+                    overlap=0.5,
+                    mode="gaussian"
+                )
+                pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
+
+                # Compute core metrics
+                gt = lbl_raw
+                intersection = np.logical_and(pred == 1, gt == 1).sum()
+                union = np.logical_or(pred == 1, gt == 1).sum()
+                pred_sum = (pred == 1).sum()
+                gt_sum = (gt == 1).sum()
+
+                if pred_sum + gt_sum == 0:
+                    dice = 1.0
+                elif pred_sum == 0 or gt_sum == 0:
+                    dice = 0.0
                 else:
-                    img_padded = img_raw
+                    dice = 2.0 * intersection / (pred_sum + gt_sum)
 
-                inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device).contiguous()
-
-                try:
-                    with torch.amp.autocast('cuda'):
-                        outputs = sliding_window_inference(
-                            inputs=inputs,
-                            roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
-                            predictor=model,
-                            overlap=0.5,
-                        )
-                except RuntimeError as re:
-                    if "cuDNN" in str(re) or "CUDNN" in str(re):
-                        torch.backends.cudnn.enabled = False
-                        outputs = sliding_window_inference(
-                            inputs=inputs,
-                            roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
-                            predictor=model,
-                            overlap=0.5,
-                        )
-                    else:
-                        raise re
-
-                prob = torch.softmax(outputs, dim=1)[:, 1:2]
-                pred = (prob > 0.5).float()
-
-                # Safely extract 3D prediction and crop back to original shape
-                pred_3d = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
-                label_3d = lbl_raw[:orig_d, :orig_h, :orig_w]
-
-                # Metric computations
-                intersection = np.logical_and(pred_3d, label_3d).sum()
-                union = np.logical_or(pred_3d, label_3d).sum()
-                pred_sum = pred_3d.sum()
-                label_sum = label_3d.sum()
-
-                if label_sum == 0 and pred_sum == 0:
-                    dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
-                elif pred_sum == 0:
-                    dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
-                elif label_sum == 0:
-                    dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
-                else:
-                    dice = 2.0 * intersection / (pred_sum + label_sum)
-                    iou = intersection / union
-                    rec = intersection / label_sum
-                    prec = intersection / pred_sum
+                iou = intersection / union if union > 0 else (1.0 if pred_sum + gt_sum == 0 else 0.0)
+                precision = intersection / pred_sum if pred_sum > 0 else (1.0 if gt_sum == 0 else 0.0)
+                recall = intersection / gt_sum if gt_sum > 0 else (1.0 if pred_sum == 0 else 0.0)
 
                 dice_scores.append(dice)
                 iou_scores.append(iou)
-                recall_scores.append(rec)
-                precision_scores.append(prec)
+                precision_scores.append(precision)
+                recall_scores.append(recall)
 
                 patient_metrics[cid] = {
-                    "Dice": float(dice),
-                    "IoU": float(iou),
-                    "Recall": float(rec),
-                    "Precision": float(prec),
+                    "dice": float(dice),
+                    "iou": float(iou),
+                    "precision": float(precision),
+                    "recall": float(recall),
+                    "pred_voxels": int(pred_sum),
+                    "gt_voxels": int(gt_sum)
                 }
 
-                # Physical geometry recovery from metadata (.pkl) or raw image
-                spacing = (1.0, 1.0, 1.0)
-                origin = (0.0, 0.0, 0.0)
-                direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-
-                if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
-                    ref_img = sitk.ReadImage(os.path.join(labels_dir, f"{cid}.nii.gz"))
-                    spacing = ref_img.GetSpacing()
-                    origin = ref_img.GetOrigin()
-                    direction = ref_img.GetDirection()
-                elif has_prep:
+                # Save 3D binary prediction mask for downstream HD95/ASSD
+                pred_path = os.path.join(val_out_dir, f"{cid}.nii.gz")
+                pred_nii = sitk.GetImageFromArray(pred)
+                # Recover spacing & origin if raw NIfTI or .pkl available
+                raw_ref = os.path.join(images_dir, f"{cid}_0000.nii.gz")
+                if os.path.exists(raw_ref):
+                    ref_img = sitk.ReadImage(raw_ref)
+                    pred_nii.SetSpacing(ref_img.GetSpacing())
+                    pred_nii.SetOrigin(ref_img.GetOrigin())
+                    pred_nii.SetDirection(ref_img.GetDirection())
+                elif prep_dir:
                     pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
                     if os.path.exists(pkl_path):
-                        try:
-                            with open(pkl_path, "rb") as pf:
-                                meta = pickle.load(pf)
-                            raw_sp = meta.get("spacing", [1.0, 1.0, 1.0])
-                            spacing = (float(raw_sp[2]), float(raw_sp[1]), float(raw_sp[0]))
-                        except Exception:
-                            pass
+                        with open(pkl_path, "rb") as pf:
+                            meta = pickle.load(pf)
+                        if "spacing" in meta:
+                            pred_nii.SetSpacing(tuple(float(s) for s in reversed(meta["spacing"])))
+                sitk.WriteImage(pred_nii, pred_path)
 
-                pred_img = sitk.GetImageFromArray(pred_3d)
-                pred_img.SetSpacing(spacing)
-                pred_img.SetOrigin(origin)
-                pred_img.SetDirection(direction)
-                sitk.WriteImage(pred_img, os.path.join(val_out_dir, f"{cid}.nii.gz"))
+                if (i + 1) % 10 == 0 or (i + 1) == len(val_ids):
+                    elapsed = time.time() - eval_start
+                    print(f"[{i+1}/{len(val_ids)}] Case: {cid} | Dice: {dice:.4f} | IoU: {iou:.4f} | Running Mean Dice: {np.mean(dice_scores):.4f} ({elapsed:.1f}s)")
 
-                # Also export ground truth mask to validation/gt_masks/ for HD95 / ASSD calculation
-                gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
-                os.makedirs(gt_dir_for_eval, exist_ok=True)
-                gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
-                if not os.path.exists(gt_nii_path):
-                    gt_img = sitk.GetImageFromArray(label_3d)
-                    gt_img.SetSpacing(spacing)
-                    gt_img.SetOrigin(origin)
-                    gt_img.SetDirection(direction)
-                    sitk.WriteImage(gt_img, gt_nii_path)
+            except Exception as e:
+                print(f"Error evaluating {cid}: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
-                del inputs, outputs, prob, pred
-                if (i + 1) % 10 == 0:
-                    torch.cuda.empty_cache()
-
-                if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
-                    print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
-            except Exception as ce:
-                print(f"Warning: Failed to evaluate case {cid}: {ce}. Skipping.")
-                continue
-
-    eval_duration = time.time() - eval_start
-    mean_dice = float(np.mean(dice_scores))
-    median_dice = float(np.median(dice_scores))
-    mean_iou = float(np.mean(iou_scores))
-    mean_recall = float(np.mean(recall_scores))
-    mean_precision = float(np.mean(precision_scores))
-
-    print("\n" + "=" * 60)
-    print(f"SWINUNETR V2 EVALUATION SUMMARY ({len(val_ids)} CASES, FOLD {args.fold})")
-    print("=" * 60)
-    print(f"Mean Dice:       {mean_dice:.4f} +/- {np.std(dice_scores):.4f}")
-    print(f"Median Dice:     {median_dice:.4f}")
-    print(f"Mean IoU:        {mean_iou:.4f}")
-    print(f"Mean Recall:     {mean_recall:.4f}")
-    print(f"Mean Precision:  {mean_precision:.4f}")
-    print(f"Inference Time:  {eval_duration:.1f}s ({eval_duration/len(val_ids):.2f}s/case)")
-    print("=" * 60)
-
-    summary_data = {
-        "model": "SwinUNETR V2",
-        "num_cases": len(val_ids),
-        "mean_dice": mean_dice,
-        "median_dice": median_dice,
+    # Summary Statistics
+    summary = {
+        "model": "SwinUNETR_v2_opt_200epochs",
+        "fold": args.fold,
+        "evaluated_cases": len(dice_scores),
+        "total_val_cases": len(val_ids),
+        "mean_dice": float(np.mean(dice_scores)),
+        "median_dice": float(np.median(dice_scores)),
         "std_dice": float(np.std(dice_scores)),
-        "mean_iou": mean_iou,
-        "mean_recall": mean_recall,
-        "mean_precision": mean_precision,
-        "eval_time_seconds": eval_duration,
-        "patient_metrics": patient_metrics,
-        "metric_per_case": [
-            {
-                "reference_file": f"{cid}.nii.gz",
-                "prediction_file": f"{cid}.nii.gz",
-                "metrics": {
-                    "1": {
-                        "Dice": m["Dice"],
-                        "IoU": m["IoU"],
-                        "Precision": m["Precision"],
-                        "Recall": m["Recall"],
-                    }
-                }
-            }
-            for cid, m in patient_metrics.items()
-        ]
+        "mean_iou": float(np.mean(iou_scores)),
+        "median_iou": float(np.median(iou_scores)),
+        "mean_precision": float(np.mean(precision_scores)),
+        "mean_recall": float(np.mean(recall_scores)),
+        "patient_metrics": patient_metrics
     }
 
-    with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as f:
-        json.dump(summary_data, f, indent=2)
+    summary_file = os.path.join(args.output_dir, "summary.json")
+    with open(summary_file, "w") as f:
+        json.dump(summary, f, indent=2)
 
-    with open(os.path.join(val_out_dir, "summary.json"), "w", encoding="utf-8") as f:
-        json.dump(summary_data, f, indent=2)
+    val_summary_file = os.path.join(val_out_dir, "summary.json")
+    with open(val_summary_file, "w") as f:
+        json.dump(summary, f, indent=2)
 
-    # Compute official paper surface metrics (HD95 & ASSD)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    paper_metrics_script = os.path.join(script_dir, "compute_paper_metrics.py")
-    if os.path.exists(paper_metrics_script):
-        print("\nComputing official paper surface metrics (HD95, ASSD)...")
-        os.system(f"python3 {paper_metrics_script} {args.output_dir} 'SwinUNETR V2 (Transformer, MONAI)'")
+    print("\n" + "=" * 60)
+    print("SWINUNETR V2 (5-PHASE OPTIMAL) EVALUATION FINISHED")
+    print("=" * 60)
+    print(f"Evaluated Cases: {len(dice_scores)}/{len(val_ids)}")
+    print(f"Mean Dice:       {np.mean(dice_scores):.4f}")
+    print(f"Median Dice:     {np.median(dice_scores):.4f}")
+    print(f"Mean IoU:        {np.mean(iou_scores):.4f}")
+    print(f"Mean Precision:  {np.mean(precision_scores):.4f}")
+    print(f"Mean Recall:     {np.mean(recall_scores):.4f}")
+    print(f"Results saved to: {summary_file}")
+    print("=" * 60)
+
+    # Automatically trigger compute_paper_metrics.py to calculate HD95 and ASSD
+    compute_metrics_script = os.path.join(SCRIPT_DIR, "compute_paper_metrics.py")
+    if os.path.exists(compute_metrics_script):
+        print("\nTriggering compute_paper_metrics.py for HD95 and ASSD...")
+        import subprocess
+        subprocess.run([
+            sys.executable,
+            compute_metrics_script,
+            "--pred_dir", val_out_dir,
+            "--gt_dir", labels_dir if has_raw else prep_dir,
+            "--output_file", os.path.join(args.output_dir, "paper_metrics_summary.txt")
+        ])
 
 if __name__ == "__main__":
     main()

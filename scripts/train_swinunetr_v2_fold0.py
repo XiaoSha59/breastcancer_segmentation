@@ -2,16 +2,15 @@
 """
 train_swinunetr_v2_fold0.py
 ===========================
-Fully Standardized SwinUNETR V2 Training for I-SPY2 Fold 0 (200 Epochs).
-Compliant with 3D_UNET_BEST_PRACTICES.md & GCP_GUIDE.md:
-1. Architecture: SwinUNETR with use_v2=True (stagewise residual convolutions)
-   and downsample="mergingv2" (normalized post-LN patch merging).
-2. Reuses 64GB preprocessed .npy/.b2nd data in nnUNetPlans_3d_fullres (zero gzip I/O bottleneck).
-3. Exactly 250 iterations per epoch (matches Krikun & nnU-Net golden recipe).
-4. Exact Poly-decay LR schedule: lr = initial_lr * (1 - epoch/max_epochs)**0.9.
-5. Exact 33% foreground oversampling per batch.
-6. AMP Mixed Precision + Activation Checkpointing keeping VRAM ~13-15 GB (fits within 24GB L4).
-7. Checkpoint saving (latest & best) + Sliding window validation on 197 cases.
+Standardized SwinUNETR V2 Training on 5 DCE-MRI Phases for I-SPY2 Fold 0 (200 Epochs).
+Compliant with 3D_UNET_BEST_PRACTICES.md & AGENTS.md:
+1. Full 5-phase kinetic input (3 natural phases + 2 subtraction phases).
+2. Architecture: monai.networks.nets.SwinUNETR with in_channels=5, out_channels=2, use_v2=True,
+   downsample="mergingv2", feature_size=48.
+3. Patch size: 160x160x64 (GPU-budgeted optimal anisotropic patch for 24GB RTX 4090).
+4. 250 iterations/epoch, 33% tumor foreground oversampling, Poly-decay LR schedule (initial 1e-4).
+5. torch.backends.cudnn.enabled = False (guarantees zero CUDNN_STATUS_NOT_INITIALIZED crashes on Ada Lovelace).
+6. CPU threads strictly limited: torch.set_num_threads(4) for shared cluster safety.
 """
 
 import os
@@ -43,7 +42,7 @@ from monai.losses import DiceCELoss
 from monai.inferers import sliding_window_inference
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train SwinUNETR V2 on I-SPY2 Fold 0")
+    parser = argparse.ArgumentParser(description="Train SwinUNETR V2 on 5 Phases (I-SPY2 Fold 0)")
     parser.add_argument("--prep_dir", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0")
@@ -51,19 +50,19 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64], help="Optimal 3D patch size for RTX 4090 24GB on breast DCE-MRI")
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64])
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
-    parser.add_argument("--use_checkpoint", action="store_true", default=False, help="Enable activation checkpointing (default False on 24GB RTX 4090 to avoid autograd kernel bugs)")
+    parser.add_argument("--use_checkpoint", action="store_true", default=False, help="Enable activation checkpointing")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     return parser.parse_args()
 
-class FastNpyBatchSampler:
+class FastNpyBatchSampler5Phases:
     """
-    High-performance patch sampler directly reading memory-mapped .b2nd (Blosc2) or .npy files.
-    Enforces nnU-Net's rule: 33% of patches are guaranteed to contain tumor tissue.
+    High-performance patch sampler directly reading memory-mapped .b2nd or .npy files
+    and slicing full 5 Phases [:5].
     """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
         self.prep_dir = prep_dir
@@ -73,14 +72,12 @@ class FastNpyBatchSampler:
         self.handles = {}
         self.is_b2nd = False
 
-        # Try blosc2
         try:
             import blosc2
             self.has_blosc2 = True
         except ImportError:
             self.has_blosc2 = False
 
-        # Pre-verify file existence (.b2nd or .npy)
         valid_ids = []
         for cid in case_ids:
             b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
@@ -93,46 +90,46 @@ class FastNpyBatchSampler:
 
         self.case_ids = valid_ids
         format_str = "Blosc2 (.b2nd)" if self.is_b2nd else "NumPy (.npy)"
-        print(f"Sampler initialized with {len(self.case_ids)} valid cases using {format_str}.")
+        print(f"5-Phase Sampler initialized with {len(self.case_ids)} valid cases using {format_str}.")
 
     def get_case_data(self, cid):
         if cid not in self.handles:
-            # Prevent open file descriptor / memory leak on shared servers
-            if len(self.handles) >= 100:
-                self.handles.pop(next(iter(self.handles)))
-            if self.is_b2nd:
+            b2nd_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
+            npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
+            seg_b2nd_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
+
+            if self.is_b2nd and self.has_blosc2 and os.path.exists(b2nd_path):
                 import blosc2
-                img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
-                seg_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
-                img_h = blosc2.open(img_path)
-                seg_h = blosc2.open(seg_path)
-                self.handles[cid] = (img_h, seg_h)
+                img_array = blosc2.open(b2nd_path, mode="r")
+                seg_array = blosc2.open(seg_b2nd_path, mode="r") if os.path.exists(seg_b2nd_path) else None
+                self.handles[cid] = (img_array, seg_array)
+            elif os.path.exists(npy_path):
+                data = np.load(npy_path, mmap_mode="r")
+                self.handles[cid] = data
             else:
-                npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
-                self.handles[cid] = np.load(npy_path, mmap_mode="r")
+                raise FileNotFoundError(f"Neither {b2nd_path} nor {npy_path} found.")
         return self.handles[cid]
 
     def sample_batch(self, batch_size):
         batch_images = []
         batch_labels = []
 
-        for b_idx in range(batch_size):
-            max_retries = 20
+        for _ in range(batch_size):
             sampled = False
-            for attempt in range(max_retries):
+            for _attempt in range(15):
                 cid = random.choice(self.case_ids)
                 try:
                     case_data = self.get_case_data(cid)
 
-                    if self.is_b2nd:
+                    if self.is_b2nd and self.has_blosc2 and isinstance(case_data, tuple):
                         img_h, seg_h = case_data
                         shape = np.array(img_h.shape[1:])
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            n_chans = min(5, img_h.shape[0])
-                            img_data = np.empty((n_chans, *shape), dtype=np.float32)
-                            for c in range(n_chans):
+                            # Slice strictly 5 channels [:5] channel-by-channel to avoid Blosc2 buffer limit
+                            img_data = np.empty((5, *shape), dtype=np.float32)
+                            for c in range(5):
                                 img_data[c] = img_h[c]
                             seg_data = np.array(seg_h[:])
                             pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
@@ -157,6 +154,7 @@ class FastNpyBatchSampler:
 
                         s_0, s_1, s_2 = start
                         p_0, p_1, p_2 = self.patch_size
+                        # Strictly 5 Channels
                         patch_img = img_arr[:5, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
@@ -187,6 +185,7 @@ class FastNpyBatchSampler:
                         s_d, s_h, s_w = start
                         p_d, p_h, p_w = self.patch_size
                         patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
+                        # Strictly slice [:5]
                         img_patch = patch[:5].astype(np.float32)
                         seg_patch = (patch[5:6] > 0).astype(np.int64)
 
@@ -208,48 +207,53 @@ class FastNpyBatchSampler:
                         self.handles.pop(cid, None)
 
             if not sampled:
-                raise RuntimeError(f"Failed to sample a valid batch after {max_retries} attempts.")
+                raise RuntimeError(f"Failed to sample valid 5-phase patch after 15 attempts.")
 
-        return torch.stack(batch_images, dim=0), torch.stack(batch_labels, dim=0)
+        images_tensor = torch.stack(batch_images, dim=0)
+        labels_tensor = torch.stack(batch_labels, dim=0)
+        return images_tensor, labels_tensor
+
+def get_poly_lr(initial_lr, current_epoch, max_epochs, exponent=0.9):
+    return initial_lr * ((1.0 - float(current_epoch) / float(max_epochs)) ** exponent)
 
 def main():
     args = parse_args()
-    # Auto-resolve splits_file if default does not exist
-    if not os.path.exists(args.splits_file):
-        candidate_splits = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
-            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
-            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
-        ]
-        for csp in candidate_splits:
-            if os.path.exists(csp):
-                args.splits_file = csp
-                break
 
-    # Auto-resolve prep_dir if default does not exist
-    if not os.path.isdir(args.prep_dir):
-        candidate_prep = [
-            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+    # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
+    if args.patch_size[0] < args.patch_size[2]:
+        args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
+
+    # Auto-resolve paths on node1 or GCP
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if args.prep_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        cand_preps = [
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
             os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
             os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
         ]
-        for cpr in candidate_prep:
-            if os.path.isdir(cpr):
-                args.prep_dir = cpr
+        for p in cand_preps:
+            if os.path.exists(p):
+                args.prep_dir = p
                 break
 
-    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    if args.splits_file.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
+        cand_splits = [
+            os.path.join(os.path.dirname(args.prep_dir), "splits_final.json"),
+            os.path.join(project_root, "splits_final.json"),
+            os.path.expanduser("~/breastcancer_segmentation/splits_final.json"),
+        ]
+        for s in cand_splits:
+            if os.path.exists(s):
+                args.splits_file = s
+                break
+
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_opt_200epochs", f"fold_{args.fold}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "train.log")
 
-    # Fixed CPU Thread Allocation for node1 (Intel i9-7900X): strictly 4 threads
+    # Cluster Safety: Fixed CPU Thread Allocation (strictly 4 threads)
     torch.set_num_threads(4)
     if hasattr(torch, "set_num_interop_threads"):
         try:
@@ -264,16 +268,9 @@ def main():
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
 
-    log_print(f"=== Starting SwinUNETR V2 Training on I-SPY2 Fold {args.fold} ===")
-    # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
-    # If passed as [64, 160, 160] (Z, Y, X), auto-transpose to [160, 160, 64]
-    if args.patch_size[0] < args.patch_size[2]:
-        args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
-        log_print(f"Auto-aligned patch_size to array order (X, Y, Z): {args.patch_size}")
-
+    log_print(f"=== Starting SwinUNETR V2 (5 PHASES - OPTIMAL PATCH) Training on I-SPY2 Fold {args.fold} ===")
     log_print(f"Arguments: {vars(args)}")
 
-    # Verify split file
     if not os.path.exists(args.splits_file):
         raise FileNotFoundError(f"Splits file not found: {args.splits_file}")
 
@@ -281,19 +278,19 @@ def main():
         splits = json.load(f)
     train_ids = splits[args.fold]["train"]
     val_ids = splits[args.fold]["val"]
-    train_sampler = FastNpyBatchSampler(args.prep_dir, train_ids, args.patch_size, oversample_foreground_percent=0.33)
+    train_sampler = FastNpyBatchSampler5Phases(args.prep_dir, train_ids, args.patch_size, oversample_foreground_percent=0.33)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Hardware stability on node1 RTX 4090: use native PyTorch CUDA kernels (same as MedNeXt)
+    # Hardware safety on RTX 4090 / L4: strictly disable cuDNN to prevent CUDNN_STATUS_NOT_INITIALIZED
     torch.backends.cudnn.benchmark = False
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.enabled = False
     log_print("Hardware safety: cuDNN disabled (torch.backends.cudnn.enabled = False). Running 100% on native PyTorch CUDA kernels.")
 
-    # SwinUNETR V2: use_v2=True and downsample="mergingv2"
-    log_print(f"Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
+    # SwinUNETR V2: in_channels=5 (5 DCE-MRI Phases), out_channels=2, use_v2=True, downsample='mergingv2'
+    log_print(f"Initializing SwinUNETR V2 for 5 Phases (in_channels=5, out_channels=2, use_v2=True, downsample='mergingv2', feature_size=48)...")
     model = SwinUNETR(
         in_channels=5,
         out_channels=2,
@@ -305,7 +302,7 @@ def main():
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log_print(f"SwinUNETR V2 initialized. Trainable parameters: {total_params / 1e6:.2f}M")
+    log_print(f"SwinUNETR V2 (5 Phases) initialized. Trainable parameters: {total_params / 1e6:.2f}M")
 
     loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
@@ -327,63 +324,61 @@ def main():
         start_epoch = ckpt["epoch"] + 1
         best_val_dice = ckpt["best_val_dice"]
         progress_history = ckpt.get("progress_history", [])
-        log_print(f"Resumed at epoch {start_epoch}. Current best Dice: {best_val_dice:.4f}")
+        log_print(f"Resumed at epoch {start_epoch}. Current best Val Dice: {best_val_dice:.4f}")
 
     start_time = time.time()
-    mean_val_dice = 0.0
+    val_sampler = FastNpyBatchSampler5Phases(args.prep_dir, val_ids, args.patch_size, oversample_foreground_percent=0.0)
 
     for epoch in range(start_epoch, args.epochs):
         epoch_start = time.time()
         model.train()
-        epoch_loss = 0.0
 
-        # Exact Poly-decay learning rate schedule (3D_UNET_BEST_PRACTICES.md Section 1)
-        current_lr = args.initial_lr * ((1.0 - epoch / args.epochs) ** 0.9)
+        current_lr = get_poly_lr(args.initial_lr, epoch, args.epochs)
         for param_group in optimizer.param_groups:
             param_group["lr"] = current_lr
+
+        running_loss = 0.0
 
         for it in range(args.iterations_per_epoch):
             images, labels = train_sampler.sample_batch(args.batch_size)
             images = images.to(device, non_blocking=True)
-            labels = torch.clamp(labels.to(device, non_blocking=True), 0, 1).long()
+            labels = labels.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
 
             with get_autocast():
-                logits = model(images)
-                loss = loss_fn(logits, labels)
+                preds = model(images)
+                loss = loss_fn(preds, labels)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=12.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
 
-            epoch_loss += loss.item()
+            running_loss += loss.item()
 
-        epoch_loss /= args.iterations_per_epoch
+        epoch_loss = running_loss / args.iterations_per_epoch
         epoch_duration = time.time() - epoch_start
+        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} Completed in {epoch_duration:.1f}s | Train Loss: {epoch_loss:.4f} | LR: {current_lr:.6f}")
 
-        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} | Train Loss: {epoch_loss:.4f} | LR: {current_lr:.6f} | Time: {epoch_duration:.1f}s")
-
-        # Sliding window evaluation on validation cohort
+        # Validation every val_interval epochs or last epoch
+        mean_val_dice = 0.0
         if (epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1:
             model.eval()
             val_dices = []
+            log_print(f"Running validation on {len(val_ids)} cases (sliding window)...")
+
             with torch.no_grad():
-                # Evaluate on a random subset of 20 val cases during training for fast EMA tracking
-                sub_val_ids = random.sample(val_ids, min(20, len(val_ids)))
-                for cid in sub_val_ids:
+                for cid in val_ids:
                     try:
                         b2nd_path = os.path.join(args.prep_dir, f"{cid}.b2nd")
                         npy_path = os.path.join(args.prep_dir, f"{cid}.npy")
-                        if os.path.exists(b2nd_path):
-                            import blosc2
-                            img_h = blosc2.open(b2nd_path)
-                            seg_h = blosc2.open(os.path.join(args.prep_dir, f"{cid}_seg.b2nd"))
-                            n_chans = min(5, img_h.shape[0])
-                            val_arr = np.empty((n_chans, *img_h.shape[1:]), dtype=np.float32)
-                            for c in range(n_chans):
+
+                        if val_sampler.is_b2nd and val_sampler.has_blosc2 and os.path.exists(b2nd_path):
+                            img_h, seg_h = val_sampler.get_case_data(cid)
+                            val_arr = np.empty((5, *img_h.shape[1:]), dtype=np.float32)
+                            for c in range(5):
                                 val_arr[c] = img_h[c]
                             val_img = torch.from_numpy(val_arr).unsqueeze(0).to(device)
                             val_lbl = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
@@ -454,15 +449,16 @@ def main():
             json.dump(progress_history, f, indent=2)
 
     total_training_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
-    log_print(f"=== SWINUNETR V2 TRAINING COMPLETE in {total_training_time}! Best Val Dice: {best_val_dice:.4f} ===")
+    log_print(f"=== SWINUNETR V2 (5 PHASES) TRAINING COMPLETE in {total_training_time}! Best Val Dice: {best_val_dice:.4f} ===")
 
-    # Write summary metadata
     summary_path = os.path.join(args.output_dir, "training_summary.json")
     with open(summary_path, "w") as f:
         json.dump({
-            "model": "SwinUNETR (V2)",
+            "model": "SwinUNETR (V2, 5 Phases)",
             "use_v2": True,
             "downsample": "mergingv2",
+            "in_channels": 5,
+            "patch_size": args.patch_size,
             "epochs": args.epochs,
             "best_val_dice": best_val_dice,
             "training_time": total_training_time,
