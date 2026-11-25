@@ -130,7 +130,10 @@ class FastNpyBatchSampler:
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            img_data = np.array(img_h[:])
+                            n_chans = min(5, img_h.shape[0])
+                            img_data = np.empty((n_chans, *shape), dtype=np.float32)
+                            for c in range(n_chans):
+                                img_data[c] = img_h[c]
                             seg_data = np.array(seg_h[:])
                             pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
                             pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
@@ -154,7 +157,7 @@ class FastNpyBatchSampler:
 
                         s_0, s_1, s_2 = start
                         p_0, p_1, p_2 = self.patch_size
-                        patch_img = img_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
+                        patch_img = img_arr[:5, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
                         img_patch = np.array(patch_img, dtype=np.float32)
