@@ -90,7 +90,7 @@ wandb/
 Thumbs.db
 desktop.ini
 
-# ── 8. EXPLICITLY KEEP SOURCE CODE ───────────────────────────────────────────
+# ── 8. EXPLICITLY KEEP SOURCE CODE & WHITELISTED DOCS ───────────────────────────
 !src/**
 !scripts/**
 !configs/**
@@ -98,6 +98,8 @@ desktop.ini
 !README.md
 !3D_UNET_BEST_PRACTICES.md
 !UNIVERSITY_SERVER_GUIDE.md
+!ACTIVATION_CHECKPOINTING_GUIDE.md
+!OPTIMAL_PATCH_SIZE_METHODOLOGY.md
 !requirements.txt
 
 # Always ignore bytecode and cache even inside scripts/
