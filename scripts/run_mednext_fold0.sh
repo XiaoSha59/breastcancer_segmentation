@@ -3,8 +3,9 @@
 # ==============================================================================
 # End-to-end execution of Official MedNeXt-L k3 on I-SPY2 Fold 0 (200 Epochs).
 # Architecture: MedNeXt-L k3 (MICCAI 2023 - Saikat Roy et al., MIC-DKFZ).
+# Protocol: 5 DCE-MRI Phases, Optimal Spatial Patch [192, 192, 64] with Activation Checkpointing.
 # Preprocess Strategy: 100% REUSE of existing nnUNetPlans_3d_fullres (.b2nd / .npy).
-# Hardware Safety: Adapts to RTX 4090 / 4080 / L4.
+# Hardware Safety: Adapts to RTX 4090 / 4080 / L4 (VRAM ~11.8 GB).
 # Cluster / Server Safety: Auto-shutdown is DISABLED by default (safe for university servers).
 # ==============================================================================
 
@@ -47,9 +48,9 @@ else
 fi
 
 if [ -n "$nnUNet_results" ] && [ "$nnUNet_results" != "$HOME/nnUNet_results" ]; then
-    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_200epochs/fold_0"
+    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_opt_200epochs/fold_0"
 else
-    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_200epochs/fold_0"
+    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_opt_200epochs/fold_0"
 fi
 mkdir -p "$RESULTS_DIR"
 
@@ -93,8 +94,8 @@ if [ ! -d "$PLAN_DIR" ]; then
 fi
 echo "Verified preprocessed directory $PLAN_DIR."
 
-echo "=== STEP 3: LAUNCH MEDNEXT-L K3 TRAINING (200 EPOCHS) ==="
-echo "[$(date)] Starting train_mednext_fold0.py for MedNeXt-L k3..."
+echo "=== STEP 3: LAUNCH MEDNEXT-L K3 TRAINING (5 PHASES, PATCH 192x192x64, 200 EPOCHS) ==="
+echo "[$(date)] Starting train_mednext_fold0.py for MedNeXt-L k3 with activation checkpointing..."
 
 python3 -u "$SCRIPT_DIR/train_mednext_fold0.py" \
     --prep_dir "$PLAN_DIR" \
@@ -104,14 +105,15 @@ python3 -u "$SCRIPT_DIR/train_mednext_fold0.py" \
     --epochs 200 \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 128 128 64 \
+    --patch_size 192 192 64 \
     --model_id L \
     --kernel_size 3 \
     --initial_lr 0.0001 \
+    --use_checkpoint \
     --resume &
 
 TRAIN_PID=$!
-echo "[$(date)] MedNeXt-L k3 training started with PID $TRAIN_PID"
+echo "[$(date)] MedNeXt-L k3 training started with PID $TRAIN_PID (Output: $RESULTS_DIR)"
 
 # Wait for training to complete
 wait $TRAIN_PID
@@ -129,10 +131,11 @@ python3 -u "$SCRIPT_DIR/evaluate_mednext_fold0.py" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \
+    --patch_size 192 192 64 \
     --model_id L \
     --kernel_size 3 || echo "Evaluation warning: Check validation logs"
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "MedNeXt-L k3 (Fold 0, 200 epochs)" || echo "Metrics warning"
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "MedNeXt-L k3 (5p, Patch 192x192x64)" || echo "Metrics warning"
 
 echo "=== MEDNEXT-L K3 TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="

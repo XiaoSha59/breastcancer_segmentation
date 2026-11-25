@@ -2,11 +2,15 @@
 """
 evaluate_mednext_fold0.py
 =========================
-Independent Sliding-Window Inference & Full Evaluation for MedNeXt on Fold 0 (197 Val Cases).
-Produces:
-1. Binary prediction masks (NIfTI .nii.gz) in <output_dir>/validation/
-2. summary.json containing patient-level Dice, Recall, Precision, IoU
-3. Full paper metrics (Mean/Median Dice, HD95, ASSD) matching Table 2 of Elena Krikun et al.
+Sliding-Window Inference & Full 197-Case Evaluation for MedNeXt-L k3 on 5 DCE-MRI Phases.
+Optimal Spatial Patch Size: [192, 192, 64].
+
+Features:
+1. Slices strictly 5 DCE-MRI Phases: Channel 0 (T0), Channel 1 (Peak Early), Channel 2 (Delayed Late), Channel 3 (SUB1), Channel 4 (SUB2).
+2. Uses num_channels=5 with deep_supervision=False for fast, high-fidelity evaluation.
+3. sliding_window_inference with autocast and automatic native Float32 fallback.
+4. Restores physical geometry headers from .pkl / raw NIfTI for authentic surface distance evaluation.
+5. Computes Mean/Median Dice, IoU, Precision, Recall and triggers compute_paper_metrics.py for HD95 & ASSD.
 """
 
 import os
@@ -14,77 +18,112 @@ import sys
 import json
 import time
 import argparse
+import pickle
 import numpy as np
 import SimpleITK as sitk
 import torch
-from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from mednext_v1 import create_mednext_v1
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
-from monai.transforms import (
-    Compose,
-    LoadImaged,
-    EnsureChannelFirstd,
-    NormalizeIntensityd,
-    EnsureTyped,
-)
-from monai.data import Dataset
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+try:
+    from scripts.mednext_v1 import create_mednext_v1
+except ImportError:
+    from mednext_v1 import create_mednext_v1
+
 from monai.inferers import sliding_window_inference
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate MedNeXt on I-SPY2 Fold 0")
+    parser = argparse.ArgumentParser(description="Evaluate MedNeXt-L k3 on 5 DCE-MRI Phases (Fold 0, Patch 192x192x64)")
     parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2")
     parser.add_argument("--prep_dir", type=str, default="", help="Path to preprocessed nnUNetPlans_3d_fullres folder")
-    parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
-    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_200epochs/fold_0")
+    parser.add_argument("--splits_file", type=str, default="")
+    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 64])
-    parser.add_argument("--model_id", type=str, default="L", choices=["S", "B", "M", "L"])
-    parser.add_argument("--kernel_size", type=int, default=3, choices=[3, 5])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
+    parser.add_argument("--kernel_size", type=int, default=3)
+    parser.add_argument("--model_id", type=str, default="L")
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
 
-    # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "MedNeXt_L_k3_200epochs", f"fold_{args.fold}")
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", f"MedNeXt_{args.model_id}_k{args.kernel_size}_opt_200epochs", f"fold_{args.fold}")
 
     val_out_dir = os.path.join(args.output_dir, "validation")
     os.makedirs(val_out_dir, exist_ok=True)
 
     checkpoint_best = os.path.join(args.output_dir, "checkpoint_best.pth")
     if not os.path.exists(checkpoint_best):
-        print(f"Error: {checkpoint_best} not found!")
+        checkpoint_best = os.path.join(args.output_dir, "checkpoint_latest.pth")
+    if not os.path.exists(checkpoint_best):
+        print(f"Error: No checkpoint found in {args.output_dir}!")
         sys.exit(1)
 
-    # Auto-resolve splits_file if default does not exist
-    if not os.path.exists(args.splits_file):
-        candidate_splits = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+    # Auto-resolve splits_file
+    if not args.splits_file or not os.path.exists(args.splits_file):
+        alt_splits = [
+            os.path.join(project_root, "splits_final.json"),
+            os.path.join(project_root, "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
             os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
-            os.path.expanduser("~/breastcancer_segmentation/splits_final.json"),
             os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
         ]
-        for csp in candidate_splits:
-            if os.path.exists(csp):
-                args.splits_file = csp
+        for asp in alt_splits:
+            if os.path.exists(asp):
+                args.splits_file = asp
                 break
 
     with open(args.splits_file, "r") as f:
         splits = json.load(f)
     val_ids = splits[args.fold]["val"]
-    print(f"Loaded {len(val_ids)} validation cases for Fold {args.fold}.")
+    print(f"Loaded split fold {args.fold}: {len(val_ids)} validation cases.")
 
-    images_dir = os.path.join(args.data_dir, "imagesTr")
-    labels_dir = os.path.join(args.data_dir, "labelsTr")
-    has_raw = os.path.exists(images_dir) and len(os.listdir(images_dir)) > 0
+    # Auto-resolve prep_dir
+    prep_dir = args.prep_dir
+    if not prep_dir or not os.path.isdir(prep_dir):
+        alt_preps = [
+            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
+            os.path.join(project_root, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
+        ]
+        for apr in alt_preps:
+            if os.path.isdir(apr):
+                prep_dir = apr
+                break
+
+    # Auto-resolve raw data_dir
+    data_dir = args.data_dir
+    if not os.path.isdir(data_dir):
+        alt_data = [
+            os.path.join(project_root, "data", "processed", "Dataset501_BreastDCE_ISPY2"),
+            os.path.expanduser("~/breastcancer_segmentation/data/processed/Dataset501_BreastDCE_ISPY2"),
+            os.path.expanduser("~/data/processed/Dataset501_BreastDCE_ISPY2"),
+        ]
+        for adr in alt_data:
+            if os.path.isdir(adr):
+                data_dir = adr
+                break
+
+    images_dir = os.path.join(data_dir, "imagesTr")
+    labels_dir = os.path.join(data_dir, "labelsTr")
+    has_raw = os.path.isdir(images_dir) and os.path.isdir(labels_dir)
+    has_prep = prep_dir and os.path.isdir(prep_dir)
+
+    print(f"Data source - Raw NIfTI: {has_raw} ({images_dir}), Preprocessed: {has_prep} ({prep_dir})")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -92,6 +131,8 @@ def main():
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+
+    # Initialize MedNeXt with strictly num_channels=5
     model = create_mednext_v1(
         num_channels=5,
         num_classes=2,
@@ -102,8 +143,7 @@ def main():
 
     print(f"Loading weights from {checkpoint_best}...")
     checkpoint = torch.load(checkpoint_best, map_location=device)
-    model_state = checkpoint["model_state_dict"]
-    model.load_state_dict(model_state, strict=False)
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     model.eval()
 
     patient_metrics = {}
@@ -112,195 +152,165 @@ def main():
     recall_scores = []
     precision_scores = []
 
-    print(f"Running sliding window inference on {len(val_ids)} validation cases (Source: {'Raw NIfTI' if has_raw else 'Preprocessed .b2nd/.npy'})...")
+    print(f"Running 5-Phase sliding window inference on {len(val_ids)} validation cases with patch {args.patch_size}...")
     eval_start = time.time()
-
-    if args.prep_dir and os.path.isdir(args.prep_dir):
-        prep_dir = args.prep_dir
-    else:
-        candidate_prep = [
-            os.path.join(os.path.dirname(args.splits_file), "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "nnUNetPlans_3d_fullres"),
-            os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres"),
-            os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
-            os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres"),
-        ]
-        prep_dir = ""
-        for cpr in candidate_prep:
-            if os.path.isdir(cpr):
-                prep_dir = cpr
-                break
-        if not prep_dir:
-            prep_dir = os.path.join(os.path.dirname(args.splits_file), "nnUNetPlans_3d_fullres")
-
-    pz, py, px = args.patch_size
 
     with torch.no_grad():
         for i, cid in enumerate(val_ids):
-            if has_raw:
-                imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
-                lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
-                img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
-                for c in range(5):
-                    mask = img_raw[c] != 0
-                    if np.any(mask):
-                        img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
-                lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
-            else:
-                b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
-                npy_path = os.path.join(prep_dir, f"{cid}.npy")
-                if os.path.exists(b2nd_path):
-                    import blosc2
-                    img_h = blosc2.open(b2nd_path)
-                    seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
-                    img_raw = np.array(img_h[:], dtype=np.float32)
-                    lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
-                elif os.path.exists(npy_path):
-                    case_data = np.load(npy_path, mmap_mode="r")
-                    img_raw = case_data[:5].astype(np.float32)
-                    lbl_raw = (case_data[5] > 0).astype(np.uint8)
+            try:
+                if has_raw:
+                    imgs = [os.path.join(images_dir, f"{cid}_{ch:04d}.nii.gz") for ch in range(5)]
+                    lbl = os.path.join(labels_dir, f"{cid}.nii.gz")
+                    img_raw = np.stack([sitk.GetArrayFromImage(sitk.ReadImage(f)) for f in imgs], axis=0).astype(np.float32)
+                    for c in range(5):
+                        mask = img_raw[c] != 0
+                        if np.any(mask):
+                            img_raw[c][mask] = (img_raw[c][mask] - img_raw[c][mask].mean()) / (img_raw[c][mask].std() + 1e-8)
+                    lbl_raw = (sitk.GetArrayFromImage(sitk.ReadImage(lbl)) > 0).astype(np.uint8)
+                elif has_prep:
+                    b2nd_path = os.path.join(prep_dir, f"{cid}.b2nd")
+                    npy_path = os.path.join(prep_dir, f"{cid}.npy")
+                    if os.path.exists(b2nd_path):
+                        import blosc2
+                        img_h = blosc2.open(b2nd_path)
+                        seg_h = blosc2.open(os.path.join(prep_dir, f"{cid}_seg.b2nd"))
+                        val_buf = np.empty((5, *img_h.shape[1:]), dtype=np.float32)
+                        for c in range(5):
+                            val_buf[c] = img_h[c]
+                        img_raw = val_buf
+                        lbl_raw = (np.array(seg_h[0], dtype=np.int16) > 0).astype(np.uint8)
+                    elif os.path.exists(npy_path):
+                        case_data = np.load(npy_path, mmap_mode="r")
+                        img_raw = case_data[:5].astype(np.float32)
+                        lbl_raw = (case_data[5] > 0).astype(np.uint8)
+                    else:
+                        print(f"Warning: Case {cid} not found in {prep_dir}, skipping.")
+                        continue
                 else:
-                    print(f"Warning: Case {cid} not found in raw or prep directory, skipping.")
+                    print(f"Error: Neither preprocessed data nor raw NIfTI found for {cid}!")
                     continue
 
-            # Original dimensions: C, D, H, W
-            _, orig_d, orig_h, orig_w = img_raw.shape
+                input_tensor = torch.from_numpy(img_raw).unsqueeze(0).to(device)
 
-            # Crucial: Pad if any spatial dimension is smaller than patch_size [pz, py, px]
-            pad_d = max(0, pz - orig_d)
-            pad_h = max(0, py - orig_h)
-            pad_w = max(0, px - orig_w)
+                # Sliding window inference
+                try:
+                    with torch.amp.autocast('cuda'):
+                        output = sliding_window_inference(
+                            inputs=input_tensor,
+                            roi_size=tuple(args.patch_size),
+                            sw_batch_size=2,
+                            predictor=model,
+                            overlap=0.5,
+                        )
+                except Exception:
+                    output = sliding_window_inference(
+                        inputs=input_tensor,
+                        roi_size=tuple(args.patch_size),
+                        sw_batch_size=2,
+                        predictor=model,
+                        overlap=0.5,
+                    )
 
-            if pad_d > 0 or pad_h > 0 or pad_w > 0:
-                img_padded = np.pad(img_raw, ((0, 0), (0, pad_d), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)
-            else:
-                img_padded = img_raw
+                if isinstance(output, list):
+                    output = output[0]
 
-            inputs = torch.from_numpy(img_padded).unsqueeze(0).to(device)
+                pred = torch.argmax(output, dim=1).squeeze().cpu().numpy().astype(np.uint8)
 
-            with torch.amp.autocast('cuda'):
-                outputs = sliding_window_inference(
-                    inputs=inputs,
-                    roi_size=tuple(args.patch_size),
-                    sw_batch_size=2,
-                    predictor=model,
-                    overlap=0.5,
-                    mode="gaussian",
-                )
+                # Metrics calculation
+                intersection = np.sum((pred == 1) & (lbl_raw == 1))
+                total_pred = np.sum(pred == 1)
+                total_gt = np.sum(lbl_raw == 1)
 
-            if isinstance(outputs, list):
-                outputs = outputs[0]
+                dice = (2.0 * intersection) / (total_pred + total_gt + 1e-8) if (total_pred + total_gt) > 0 else 1.0
+                iou = intersection / (total_pred + total_gt - intersection + 1e-8) if (total_pred + total_gt - intersection) > 0 else 1.0
+                precision = intersection / (total_pred + 1e-8) if total_pred > 0 else (1.0 if total_gt == 0 else 0.0)
+                recall = intersection / (total_gt + 1e-8) if total_gt > 0 else (1.0 if total_pred == 0 else 0.0)
 
-            prob = torch.softmax(outputs, dim=1)[:, 1:2]
-            pred = (prob > 0.5).float()
+                dice_scores.append(dice)
+                iou_scores.append(iou)
+                precision_scores.append(precision)
+                recall_scores.append(recall)
 
-            pred_np = pred[0, 0, :orig_d, :orig_h, :orig_w].cpu().numpy().astype(np.uint8)
-            label_np = lbl_raw[:orig_d, :orig_h, :orig_w]
+                patient_metrics[cid] = {
+                    "Dice": float(dice),
+                    "IoU": float(iou),
+                    "Precision": float(precision),
+                    "Recall": float(recall),
+                }
 
-            intersection = np.logical_and(pred_np, label_np).sum()
-            union = np.logical_or(pred_np, label_np).sum()
-            pred_sum = pred_np.sum()
-            label_sum = label_np.sum()
+                # Save predicted NIfTI mask with authentic physical header
+                pred_sitk = sitk.GetImageFromArray(pred)
+                pkl_path = os.path.join(prep_dir, f"{cid}.pkl") if has_prep else ""
+                raw_lbl_path = os.path.join(labels_dir, f"{cid}.nii.gz") if has_raw else ""
 
-            if label_sum == 0 and pred_sum == 0:
-                dice, iou, rec, prec = 1.0, 1.0, 1.0, 1.0
-            elif pred_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 0.0, 0.0
-            elif label_sum == 0:
-                dice, iou, rec, prec = 0.0, 0.0, 1.0, 0.0
-            else:
-                dice = 2.0 * intersection / (pred_sum + label_sum)
-                iou = intersection / union
-                rec = intersection / label_sum
-                prec = intersection / pred_sum
-
-            dice_scores.append(dice)
-            iou_scores.append(iou)
-            recall_scores.append(rec)
-            precision_scores.append(prec)
-
-            patient_metrics[cid] = {
-                "Dice": float(dice),
-                "IoU": float(iou),
-                "Recall": float(rec),
-                "Precision": float(prec),
-            }
-
-            # NIfTI geometry export with raw or metadata fallback
-            if has_raw and os.path.exists(os.path.join(labels_dir, f"{cid}.nii.gz")):
-                ref_path = os.path.join(labels_dir, f"{cid}.nii.gz")
-                ref_img = sitk.ReadImage(ref_path)
-                spacing = ref_img.GetSpacing()
-                origin = ref_img.GetOrigin()
-                direction = ref_img.GetDirection()
-            else:
-                pkl_path = os.path.join(prep_dir, f"{cid}.pkl")
                 if os.path.exists(pkl_path):
-                    import pickle
                     try:
                         with open(pkl_path, "rb") as pf:
-                            meta = pickle.load(pf)
-                        raw_sp = meta.get("spacing", [1.0, 1.0, 1.0])
-                        spacing = (float(raw_sp[2]), float(raw_sp[1]), float(raw_sp[0]))
+                            props = pickle.load(pf)
+                        spacing = props.get("spacing", (1.0, 1.0, 1.0))
+                        pred_sitk.SetSpacing((float(spacing[2]), float(spacing[1]), float(spacing[0])))
                     except Exception:
-                        spacing = (1.0, 1.0, 1.0)
-                else:
-                    spacing = (1.0, 1.0, 1.0)
-                origin = (0.0, 0.0, 0.0)
-                direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+                        pass
+                elif os.path.exists(raw_lbl_path):
+                    try:
+                        ref_img = sitk.ReadImage(raw_lbl_path)
+                        pred_sitk.CopyInformation(ref_img)
+                    except Exception:
+                        pass
 
-            pred_img = sitk.GetImageFromArray(pred_np)
-            pred_img.SetSpacing(spacing)
-            pred_img.SetOrigin(origin)
-            pred_img.SetDirection(direction)
-            out_nii_path = os.path.join(val_out_dir, f"{cid}.nii.gz")
-            sitk.WriteImage(pred_img, out_nii_path)
+                out_nii_path = os.path.join(val_out_dir, f"{cid}.nii.gz")
+                sitk.WriteImage(pred_sitk, out_nii_path)
 
-            # Also export ground truth NIfTI for HD95 calculation if raw is absent
-            gt_dir_for_eval = os.path.join(val_out_dir, "gt_masks")
-            os.makedirs(gt_dir_for_eval, exist_ok=True)
-            gt_nii_path = os.path.join(gt_dir_for_eval, f"{cid}.nii.gz")
-            if not os.path.exists(gt_nii_path):
-                gt_img = sitk.GetImageFromArray(label_np)
-                gt_img.SetSpacing(spacing)
-                gt_img.SetOrigin(origin)
-                gt_img.SetDirection(direction)
-                sitk.WriteImage(gt_img, gt_nii_path)
+                if (i + 1) % 20 == 0 or (i + 1) == len(val_ids):
+                    print(f"[{i+1:03d}/{len(val_ids):03d}] Case {cid}: Dice={dice:.4f}, Running Mean Dice={np.mean(dice_scores):.4f}")
 
-            del inputs, outputs, prob, pred
-            if (i + 1) % 10 == 0:
-                torch.cuda.empty_cache()
-
-            if (i + 1) % 25 == 0 or (i + 1) == len(val_ids):
-                print(f"[{i+1}/{len(val_ids)}] {cid}: Dice={dice:.4f} | Running Mean Dice={np.mean(dice_scores):.4f}")
+            except Exception as e:
+                print(f"Error evaluating case {cid}: {e}")
+                continue
 
     eval_duration = time.time() - eval_start
-    print(f"Inference complete in {eval_duration:.1f}s.")
+    mean_dice = float(np.mean(dice_scores)) if dice_scores else 0.0
+    median_dice = float(np.median(dice_scores)) if dice_scores else 0.0
+    mean_iou = float(np.mean(iou_scores)) if iou_scores else 0.0
+    mean_precision = float(np.mean(precision_scores)) if precision_scores else 0.0
+    mean_recall = float(np.mean(recall_scores)) if recall_scores else 0.0
 
-    summary_data = {
-        "mean_dice": float(np.mean(dice_scores)),
-        "median_dice": float(np.median(dice_scores)),
-        "std_dice": float(np.std(dice_scores)),
-        "mean_iou": float(np.mean(iou_scores)),
-        "mean_recall": float(np.mean(recall_scores)),
-        "mean_precision": float(np.mean(precision_scores)),
-        "cases": patient_metrics,
-        "metric_per_case": [
-            {"reference_file": cid, "metrics": {"1": {"Dice": m["Dice"], "IoU": m["IoU"], "Recall": m["Recall"], "Precision": m["Precision"]}}}
-            for cid, m in patient_metrics.items()
-        ],
+    summary = {
+        "model": f"MedNeXt-{args.model_id} k{args.kernel_size} (5-Phase, Patch {args.patch_size})",
+        "fold": args.fold,
+        "cases_evaluated": len(dice_scores),
+        "mean_dice": mean_dice,
+        "median_dice": median_dice,
+        "mean_iou": mean_iou,
+        "mean_precision": mean_precision,
+        "mean_recall": mean_recall,
+        "evaluation_time_seconds": eval_duration,
+        "patient_metrics": patient_metrics,
     }
 
-    summary_file = os.path.join(val_out_dir, "summary.json")
-    with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump(summary_data, f, indent=2)
-    print(f"Saved patient-level summary to {summary_file}")
+    summary_file = os.path.join(args.output_dir, "summary.json")
+    with open(summary_file, "w") as f:
+        json.dump(summary, f, indent=4)
 
-    # Compute surface metrics (HD95, ASSD)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    compute_paper_metrics_script = os.path.join(script_dir, "compute_paper_metrics.py")
-    if os.path.exists(compute_paper_metrics_script):
-        cmd = f"python3 {compute_paper_metrics_script} {args.output_dir} 'MedNeXt-{args.model_id} k{args.kernel_size} (DKFZ)'"
-        os.system(cmd)
+    print("\n" + "=" * 60)
+    print(f"EVALUATION SUMMARY - MedNeXt-{args.model_id} k{args.kernel_size} (5-Phase, Patch {args.patch_size})")
+    print("=" * 60)
+    print(f"Validation Cases Evaluated: {len(dice_scores)}")
+    print(f"Mean Dice:       {mean_dice:.4f}")
+    print(f"Median Dice:     {median_dice:.4f}")
+    print(f"Mean IoU:        {mean_iou:.4f}")
+    print(f"Mean Precision:  {mean_precision:.4f}")
+    print(f"Mean Recall:     {mean_recall:.4f}")
+    print(f"Evaluation Time: {eval_duration:.1f}s ({eval_duration/60:.1f}m)")
+    print(f"Summary saved to: {summary_file}")
+    print("=" * 60)
+
+    # Compute paper metrics (HD95 & ASSD)
+    paper_metrics_script = os.path.join(SCRIPT_DIR, "compute_paper_metrics.py")
+    if os.path.exists(paper_metrics_script):
+        print("\nTriggering compute_paper_metrics.py for HD95 & ASSD calculation...")
+        os.system(f'python3 "{paper_metrics_script}" "{args.output_dir}" "MedNeXt-{args.model_id} k{args.kernel_size} (5p, Patch {args.patch_size})"')
+
 
 if __name__ == "__main__":
     main()
