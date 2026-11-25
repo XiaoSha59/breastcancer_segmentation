@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
-    parser.add_argument("--use_checkpoint", action="store_true", default=False, help="Enable activation checkpointing")
+    parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Enable activation checkpointing (default True for 160x160x64 to prevent OOM)")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     return parser.parse_args()
 

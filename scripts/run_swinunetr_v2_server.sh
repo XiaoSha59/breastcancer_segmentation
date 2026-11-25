@@ -121,6 +121,7 @@ python3 -u "$SCRIPT_DIR/train_swinunetr_v2_fold0.py" \
     --patch_size 160 160 64 \
     --feature_size 48 \
     --initial_lr 0.0001 \
+    --use_checkpoint \
     $EXTRA_FLAGS &
 
 TRAIN_PID=$!
