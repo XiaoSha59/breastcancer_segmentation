@@ -290,9 +290,8 @@ def main():
     log_print("Hardware safety: cuDNN disabled (torch.backends.cudnn.enabled = False). Running 100% on native PyTorch CUDA kernels.")
 
     # SwinUNETR V2: use_v2=True and downsample="mergingv2"
-    log_print(f"Initializing SwinUNETR V2 (img_size={args.patch_size}, use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
+    log_print(f"Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
     model = SwinUNETR(
-        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,
