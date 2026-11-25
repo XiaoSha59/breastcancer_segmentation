@@ -105,11 +105,13 @@ fi
 echo "[$(date)] Starting nnUNetv2_train for Standard 3D nnU-Net (3 phases)..."
 nnUNetv2_train 501 3d_fullres 0 -tr nnUNetTrainer_3phases_200epochs -p nnUNetPlans $EXTRA_FLAGS
 
-echo "=== STEP 4: OFFICIAL VALIDATION ON CHECKPOINT_BEST ==="
-echo "[$(date)] Running validation on 197 Fold 0 cases..."
-nnUNetv2_train 501 3d_fullres 0 -tr nnUNetTrainer_3phases_200epochs -p nnUNetPlans --val --val_best
+# Training completes and automatically executes single-pass official validation on checkpoint_best.pth
+if [ ! -f "$RESULTS_DIR/validation/summary.json" ] && [ -f "$RESULTS_DIR/checkpoint_best.pth" ]; then
+    echo "Notice: Running validation pass on checkpoint_best.pth..."
+    nnUNetv2_train 501 3d_fullres 0 -tr nnUNetTrainer_3phases_200epochs -p nnUNetPlans --val --val_best
+fi
 
-echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
+echo "=== STEP 4: COMPUTE OFFICIAL PAPER METRICS (DICE, HD95, ASSD) ==="
 python3 "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "Standard 3D nnU-Net (3 Natural Phases)" || echo "Warning: Paper metrics extraction completed with notices."
 
 echo "=============================================================================="

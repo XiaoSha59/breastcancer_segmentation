@@ -110,3 +110,11 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         if batch['data'].shape[1] > 3:
             batch['data'] = batch['data'][:, :3].contiguous()
         return super().validation_step(batch)
+
+    def on_train_end(self):
+        self.save_checkpoint(os.path.join(self.output_folder, "checkpoint_final.pth"))
+        best_ckpt = os.path.join(self.output_folder, "checkpoint_best.pth")
+        if os.path.exists(best_ckpt):
+            self.load_checkpoint(best_ckpt)
+            self.logger.log_text_and_print("Loaded checkpoint_best.pth for single-pass official validation.")
+        self.perform_actual_validation(save_probabilities=False)
