@@ -46,9 +46,9 @@ else
 fi
 
 if [ -n "$nnUNet_results" ] && [ "$nnUNet_results" != "$HOME/nnUNet_results" ]; then
-    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_3phases_200epochs/fold_0"
+    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_3phases_opt_200epochs/fold_0"
 else
-    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_3phases_200epochs/fold_0"
+    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/MedNeXt_L_k3_3phases_opt_200epochs/fold_0"
 fi
 mkdir -p "$RESULTS_DIR"
 
@@ -108,14 +108,15 @@ python3 -u "$SCRIPT_DIR/train_mednext_3phases_fold0.py" \
     --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 128 128 64 \
+    --patch_size 192 192 64 \
     --model_id L \
     --kernel_size 3 \
     --initial_lr 0.0001 \
+    --use_checkpoint \
     $EXTRA_FLAGS &
 
 TRAIN_PID=$!
-echo "[$(date)] MedNeXt-L k3 3-phase training started with PID $TRAIN_PID"
+echo "[$(date)] MedNeXt-L k3 3-phase training started with PID $TRAIN_PID (Patch [192, 192, 64])"
 
 wait $TRAIN_PID
 TRAIN_EXIT=$?
@@ -132,10 +133,11 @@ python3 -u "$SCRIPT_DIR/evaluate_mednext_3phases_fold0.py" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \
+    --patch_size 192 192 64 \
     --model_id L \
     --kernel_size 3 || echo "Evaluation warning: Check validation logs"
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "MedNeXt-L k3 (3 Natural Phases, 200 epochs)" || echo "Metrics warning"
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "MedNeXt-L k3 3-Phases (Fold 0, Patch 192x192x64)" || echo "Metrics warning"
 
 echo "=== MEDNEXT-L K3 3-PHASE TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="
