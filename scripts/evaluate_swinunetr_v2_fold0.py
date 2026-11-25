@@ -6,7 +6,7 @@ Sliding-Window Inference & Full 197-Case Evaluation for SwinUNETR v2 on 5 DCE-MR
 Features:
 1. Full 5 Phases input: Channel 0 (Pre), 1 (Peak Early), 2 (Delayed Late), 3 (Sub 1), 4 (Sub 2).
 2. Uses in_channels=5, out_channels=2, feature_size=48, downsample="mergingv2", use_v2=True.
-3. Optimal patch size: 160x160x64 (auto-aligned to (X, Y, Z) array order).
+3. Optimal patch size: 192x192x64 (auto-aligned to (X, Y, Z) array order).
 4. Slices strictly 5 channels from Blosc2 (.b2nd) without buffer fragmentation.
 5. Computes Mean/Median Dice, IoU, Precision, Recall and triggers compute_paper_metrics.py for HD95 & ASSD.
 """
@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()

@@ -118,7 +118,7 @@ python3 -u "$SCRIPT_DIR/train_swinunetr_v2_fold0.py" \
     --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 160 160 64 \
+    --patch_size 192 192 64 \
     --feature_size 48 \
     --initial_lr 0.0001 \
     --use_checkpoint \
@@ -144,7 +144,7 @@ if [ "$NUM_EPOCHS" -ge 200 ]; then
         --splits_file "$SPLITS_FILE" \
         --output_dir "$RESULTS_DIR" \
         --fold 0 \
-        --patch_size 160 160 64 \
+        --patch_size 192 192 64 \
         --feature_size 48 \
         --num_workers 4 || echo "Evaluation warning: Check validation logs"
 else
@@ -152,6 +152,6 @@ else
 fi
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "SwinUNETR V2 (5p, Patch 160x160x64)" || echo "Metrics warning"
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "SwinUNETR V2 (5p, Patch 192x192x64)" || echo "Metrics warning"
 
 echo "=== SWINUNETR V2 TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="

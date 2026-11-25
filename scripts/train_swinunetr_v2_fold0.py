@@ -7,7 +7,7 @@ Compliant with 3D_UNET_BEST_PRACTICES.md & AGENTS.md:
 1. Full 5-phase kinetic input (3 natural phases + 2 subtraction phases).
 2. Architecture: monai.networks.nets.SwinUNETR with in_channels=5, out_channels=2, use_v2=True,
    downsample="mergingv2", feature_size=48.
-3. Patch size: 160x160x64 (GPU-budgeted optimal anisotropic patch for 24GB RTX 4090).
+3. Patch size: 192x192x64 (synchronized 100% with ResEnc-L & Standard nnU-Net Preset L on 24GB RTX 4090).
 4. 250 iterations/epoch, 33% tumor foreground oversampling, Poly-decay LR schedule (initial 1e-4).
 5. torch.backends.cudnn.enabled = False (guarantees zero CUDNN_STATUS_NOT_INITIALIZED crashes on Ada Lovelace).
 6. CPU threads strictly limited: torch.set_num_threads(4) for shared cluster safety.
@@ -50,12 +50,12 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
-    parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Enable activation checkpointing (default True for 160x160x64 to prevent OOM)")
+    parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Enable activation checkpointing (default True for 192x192x64 to prevent OOM)")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint_latest.pth if available")
     return parser.parse_args()
 
