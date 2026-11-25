@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64], help="Optimal patch size matching ResEnc-L [192, 192, 64]")
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64], help="Optimal patch size [192, 192, 64]")
     parser.add_argument("--kernel_size", type=int, default=3)
     parser.add_argument("--model_id", type=str, default="L")
     parser.add_argument("--initial_lr", type=float, default=1e-4)
@@ -106,30 +106,43 @@ class Fast5PhaseBatchSampler:
                 except OSError:
                     pass
             self.case_ids = valid_b2nd
+            print(f"MedNeXt 5-Phase Sampler initialized with {len(self.case_ids)} valid cases using Blosc2 (.b2nd).")
         else:
-            self.case_ids = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.npy"))]
+            npy_cases = [cid for cid in case_ids if os.path.exists(os.path.join(prep_dir, f"{cid}.npy"))]
+            valid_npy = []
+            for cid in npy_cases:
+                fpath = os.path.join(prep_dir, f"{cid}.npy")
+                try:
+                    if os.path.getsize(fpath) > 1024:
+                        valid_npy.append(cid)
+                except OSError:
+                    pass
+            self.case_ids = valid_npy
+            print(f"MedNeXt 5-Phase Sampler initialized with {len(self.case_ids)} valid cases using Numpy (.npy).")
 
     def get_case_data(self, cid):
-        if self.is_b2nd:
-            if cid not in self.handles:
+        if cid not in self.handles:
+            if len(self.handles) >= 100:
+                self.handles.pop(next(iter(self.handles)))
+            if self.is_b2nd:
                 import blosc2
                 img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
                 seg_path = os.path.join(self.prep_dir, f"{cid}_seg.b2nd")
-                self.handles[cid] = (blosc2.open(img_path), blosc2.open(seg_path))
-            return self.handles[cid]
-        else:
-            if cid not in self.handles:
+                img_h = blosc2.open(img_path)
+                seg_h = blosc2.open(seg_path)
+                self.handles[cid] = (img_h, seg_h)
+            else:
                 npy_path = os.path.join(self.prep_dir, f"{cid}.npy")
                 self.handles[cid] = np.load(npy_path, mmap_mode="r")
-            return self.handles[cid]
+        return self.handles[cid]
 
     def sample_batch(self, batch_size):
         batch_images = []
         batch_labels = []
 
-        for _ in range(batch_size):
+        for b in range(batch_size):
             max_retries = 20
-            for _ in range(max_retries):
+            for attempt in range(max_retries):
                 cid = random.choice(self.case_ids)
                 try:
                     data_or_handles = self.get_case_data(cid)
@@ -242,24 +255,27 @@ def main():
 
     log_print(f"=== Starting MedNeXt-{args.model_id} k{args.kernel_size} 5-Phase Training on I-SPY2 Fold {args.fold} ===")
     log_print("Biomarker Protocol: 5 DCE-MRI Phases (T0, T_early, T_late, SUB1, SUB2).")
-    log_print(f"Optimal Spatial Patch Size: {args.patch_size} (Context Volume Coverage: ~45%).")
+    log_print(f"Optimal Spatial Patch Size: {args.patch_size} (Receptive Field Context: ~45%).")
     log_print(f"Activation Checkpointing: {args.use_checkpoint} (Peak VRAM: ~11.8 GB).")
     log_print(f"PyTorch Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        gpu_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        log_print(f"GPU: {gpu_name} ({gpu_vram:.2f} GiB VRAM)")
+    if device.type == "cuda":
+        log_print(f"Device: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        log_print("cuDNN disabled for safety on node1. Running 100% on rock-solid native PyTorch CUDA kernels.")
 
     # Auto-resolve splits_file
     if not os.path.exists(args.splits_file):
         alt_splits = [
-            os.path.join(PROJECT_DIR, "splits_final.json"),
-            os.path.join(PROJECT_DIR, "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
-            os.path.join(PROJECT_DIR, "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "processed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "preprocessed", "Dataset501_BreastDCE_ISPY2", "splits_final.json"),
             os.path.expanduser("~/breastcancer_segmentation/data/preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
             os.path.expanduser("~/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "splits_final.json"),
         ]
         for asp in alt_splits:
             if os.path.exists(asp):
@@ -334,33 +350,32 @@ def main():
         model.train()
         epoch_loss = 0.0
 
-        # Exact Poly-decay learning rate schedule
-        poly_lr = args.initial_lr * (1.0 - epoch / args.epochs) ** 0.9
+        # Exact Poly-decay LR schedule
+        current_lr = args.initial_lr * ((1.0 - epoch / args.epochs) ** 0.9)
         for param_group in optimizer.param_groups:
-            param_group["lr"] = poly_lr
+            param_group["lr"] = current_lr
 
         for it in range(args.iterations_per_epoch):
             images, labels = train_sampler.sample_batch(args.batch_size)
             images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True).long()
 
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast('cuda'):
-                outputs = model(images)
-                if isinstance(outputs, list):
-                    # MedNeXt Deep Supervision weighting: [1/2^0, 1/2^1, 1/2^2, 1/2^3] normalized
-                    weights = [1.0 / (2 ** i) for i in range(len(outputs))]
+                logits = model(images)
+                if isinstance(logits, list):
+                    weights = [1.0 / (2 ** i) for i in range(len(logits))]
                     weights = [w / sum(weights) for w in weights]
                     loss = 0.0
-                    for out, w in zip(outputs, weights):
-                        if out.shape[2:] != labels.shape[2:]:
-                            down_target = nn.functional.interpolate(labels, size=out.shape[2:], mode="nearest")
+                    for l, w in zip(logits, weights):
+                        if l.shape[2:] != labels.shape[2:]:
+                            down_labels = torch.nn.functional.interpolate(labels.float(), size=l.shape[2:], mode="nearest").long()
                         else:
-                            down_target = labels
-                        loss += w * loss_fn(out, down_target)
+                            down_labels = labels
+                        loss = loss + w * loss_fn(l, down_labels)
                 else:
-                    loss = loss_fn(outputs, labels)
+                    loss = loss_fn(logits, labels)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -371,7 +386,8 @@ def main():
             epoch_loss += loss.item()
 
         epoch_loss /= args.iterations_per_epoch
-        epoch_time = time.time() - epoch_start
+        epoch_duration = time.time() - epoch_start
+        log_print(f"Epoch {epoch:03d}/{args.epochs:03d} | Train Loss: {epoch_loss:.4f} | Poly LR: {current_lr:.6f} | Time: {epoch_duration:.1f}s")
 
         # Fast Proxy Validation (20 random cases)
         if (epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1:
@@ -424,57 +440,52 @@ def main():
                     if isinstance(val_out, list):
                         val_out = val_out[0]
 
-                    val_pred = torch.argmax(val_out, dim=1).squeeze().cpu().numpy().astype(np.uint8)
-                    inter = np.sum((val_pred == 1) & (val_lbl == 1))
-                    denom = np.sum(val_pred == 1) + np.sum(val_lbl == 1)
-                    dice = (2.0 * inter) / (denom + 1e-8) if denom > 0 else 1.0
+                    pred = (torch.softmax(val_out, dim=1)[0, 1] > 0.5).cpu().numpy().astype(np.uint8)
+                    inter = np.logical_and(pred, val_lbl).sum()
+                    union = pred.sum() + val_lbl.sum()
+                    dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
                     val_dices.append(dice)
+                    del val_img, val_out, pred
 
             mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
-            log_print(
-                f"Epoch {epoch+1:03d}/{args.epochs} | Loss: {epoch_loss:.4f} | "
-                f"Val Dice (20 cases): {mean_val_dice:.4f} | LR: {poly_lr:.6f} | Time: {epoch_time:.1f}s"
-            )
-
-            # Checkpoint management
-            if mean_val_dice > best_val_dice:
+            is_best = mean_val_dice > best_val_dice
+            if is_best:
                 best_val_dice = mean_val_dice
-                log_print(f"New best validation Dice achieved: {best_val_dice:.4f}! Saving checkpoint_best.pth")
+                log_print(f"🎉 New best 5-phase validation Dice: {best_val_dice:.4f}! Saving checkpoint_best.pth")
                 torch.save({
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scaler_state_dict": scaler.state_dict(),
                     "best_val_dice": best_val_dice,
-                    "patch_size": args.patch_size,
-                    "progress_history": progress_history,
+                    "args": vars(args),
+                    "model_name": f"MedNeXt_{args.model_id}_k{args.kernel_size}_opt_200epochs",
                 }, checkpoint_best)
-        else:
-            log_print(
-                f"Epoch {epoch+1:03d}/{args.epochs} | Loss: {epoch_loss:.4f} | "
-                f"LR: {poly_lr:.6f} | Time: {epoch_time:.1f}s"
-            )
 
-        # Save checkpoint_latest every epoch
+            log_print(f"Validation Epoch {epoch:03d} | Proxy Val Dice: {mean_val_dice:.4f} (Best: {best_val_dice:.4f}) {'[★ NEW BEST]' if is_best else ''}")
+
+        is_val_epoch = ((epoch + 1) % args.val_interval == 0 or epoch == args.epochs - 1)
         progress_history.append({
-            "epoch": epoch + 1,
-            "loss": float(epoch_loss),
-            "val_dice": float(mean_val_dice),
-            "lr": float(poly_lr),
-            "time_seconds": float(epoch_time),
+            "epoch": epoch,
+            "train_loss": epoch_loss,
+            "lr": current_lr,
+            "val_dice": mean_val_dice if is_val_epoch else None,
+            "time_seconds": epoch_duration,
         })
+
         torch.save({
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scaler_state_dict": scaler.state_dict(),
             "best_val_dice": best_val_dice,
-            "patch_size": args.patch_size,
             "progress_history": progress_history,
+            "args": vars(args),
+            "model_name": f"MedNeXt_{args.model_id}_k{args.kernel_size}_opt_200epochs",
         }, checkpoint_latest)
 
-    total_time = (time.time() - start_time) / 3600
-    log_print(f"=== MedNeXt-L k3 (5-Phase, Patch {args.patch_size}) Training Completed in {total_time:.2f} hours. Best Val Dice: {best_val_dice:.4f} ===")
+    total_training_time = time.time() - start_time
+    log_print(f"=== MEDNEXT 5-PHASE TRAINING COMPLETE in {datetime.timedelta(seconds=int(total_training_time))}! Best Val Dice: {best_val_dice:.4f} ===")
 
 
 if __name__ == "__main__":
