@@ -116,5 +116,6 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         best_ckpt = os.path.join(self.output_folder, "checkpoint_best.pth")
         if os.path.exists(best_ckpt):
             self.load_checkpoint(best_ckpt)
-            self.logger.log_text_and_print("Loaded checkpoint_best.pth for single-pass official validation.")
+            self.print_to_log_file("Loaded checkpoint_best.pth for single-pass official validation.")
+            print("Loaded checkpoint_best.pth for single-pass official validation.")
         self.perform_actual_validation(save_probabilities=False)
