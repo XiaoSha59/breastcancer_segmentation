@@ -33,13 +33,18 @@ def parse_args():
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[96, 96, 96])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64], help="Optimal 3D patch size for RTX 4090 24GB on breast DCE-MRI")
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()
 
 def main():
     args = parse_args()
+
+    # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
+    if args.patch_size[0] < args.patch_size[2]:
+        args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
+        print(f"Auto-aligned patch_size to array order (X, Y, Z): {args.patch_size}")
 
     # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
@@ -101,9 +106,12 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch.backends.cudnn.enabled = True
+        # Rule 9: Disable cuDNN on node1 for rock-solid stability
+        torch.backends.cudnn.enabled = False
         torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
     model = SwinUNETR(
+        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,

@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[96, 96, 96])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64], help="Optimal 3D patch size for RTX 4090 24GB on breast DCE-MRI")
     parser.add_argument("--feature_size", type=int, default=48)
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
@@ -262,6 +262,12 @@ def main():
             f.write(formatted + "\n")
 
     log_print(f"=== Starting SwinUNETR V2 Training on I-SPY2 Fold {args.fold} ===")
+    # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
+    # If passed as [64, 160, 160] (Z, Y, X), auto-transpose to [160, 160, 64]
+    if args.patch_size[0] < args.patch_size[2]:
+        args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
+        log_print(f"Auto-aligned patch_size to array order (X, Y, Z): {args.patch_size}")
+
     log_print(f"Arguments: {vars(args)}")
 
     # Verify split file
@@ -284,8 +290,9 @@ def main():
     log_print("Hardware safety: cuDNN disabled (torch.backends.cudnn.enabled = False). Running 100% on native PyTorch CUDA kernels.")
 
     # SwinUNETR V2: use_v2=True and downsample="mergingv2"
-    log_print(f"Initializing SwinUNETR V2 (use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
+    log_print(f"Initializing SwinUNETR V2 (img_size={args.patch_size}, use_v2=True, downsample='mergingv2', feature_size=48, use_checkpoint={args.use_checkpoint})...")
     model = SwinUNETR(
+        img_size=tuple(args.patch_size),
         in_channels=5,
         out_channels=2,
         feature_size=args.feature_size,

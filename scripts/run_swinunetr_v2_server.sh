@@ -118,7 +118,7 @@ python3 -u "$SCRIPT_DIR/train_swinunetr_v2_fold0.py" \
     --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 96 96 96 \
+    --patch_size 160 160 64 \
     --feature_size 48 \
     --initial_lr 0.0001 \
     $EXTRA_FLAGS &
@@ -143,7 +143,7 @@ if [ "$NUM_EPOCHS" -ge 200 ]; then
         --splits_file "$SPLITS_FILE" \
         --output_dir "$RESULTS_DIR" \
         --fold 0 \
-        --patch_size 96 96 96 \
+        --patch_size 160 160 64 \
         --feature_size 48 \
         --num_workers 4 || echo "Evaluation warning: Check validation logs"
 else
