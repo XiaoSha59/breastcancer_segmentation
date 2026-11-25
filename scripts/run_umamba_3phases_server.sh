@@ -52,7 +52,7 @@ else
     PREPROCESSED_DIR="${nnUNet_preprocessed:-$HOME/nnUNet_preprocessed}/Dataset501_BreastDCE_ISPY2"
 fi
 
-RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_3phases_200epochs/fold_0"
+RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_3phases_opt_200epochs/fold_0"
 mkdir -p "$RESULTS_DIR"
 
 # Server safety trap: Terminate child processes on exit, NEVER shutdown the machine
@@ -80,7 +80,7 @@ echo "Verified splits_final.json exists at $SPLITS_FILE (785 train / 197 val)."
 PLAN_DIR="$PREPROCESSED_DIR/nnUNetPlans_3d_fullres"
 echo "Verified preprocessed directory $PLAN_DIR."
 
-echo "=== STEP 2: LAUNCH U-MAMBA BOT 3D (3 PHASES) TRAINING (200 EPOCHS) ==="
+echo "=== STEP 2: LAUNCH U-MAMBA BOT 3D (3 PHASES, PATCH 192x192x64) TRAINING (200 EPOCHS) ==="
 EXTRA_FLAGS=""
 if [ -f "$RESULTS_DIR/checkpoint_latest.pth" ]; then
     echo "Found existing checkpoint_latest.pth in $RESULTS_DIR, enabling --resume flag."
@@ -97,12 +97,12 @@ python3 -u "$SCRIPT_DIR/train_umamba_3phases_fold0.py" \
     --epochs "$NUM_EPOCHS" \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 128 128 64 \
+    --patch_size 192 192 64 \
     --initial_lr 0.0001 \
     $EXTRA_FLAGS &
 
 TRAIN_PID=$!
-echo "[$(date)] U-Mamba Bot 3D (3 Phases) training started with PID $TRAIN_PID ($NUM_EPOCHS epochs)"
+echo "[$(date)] U-Mamba Bot 3D (3 Phases) training started with PID $TRAIN_PID ($NUM_EPOCHS epochs, Patch [192, 192, 64])"
 
 wait $TRAIN_PID
 TRAIN_EXIT=$?
@@ -120,11 +120,11 @@ if [ "$NUM_EPOCHS" -ge 200 ]; then
         --splits_file "$SPLITS_FILE" \
         --output_dir "$RESULTS_DIR" \
         --fold 0 \
-        --patch_size 128 128 64 \
+        --patch_size 192 192 64 \
         --num_workers 4 || echo "Evaluation warning: Check validation logs"
 fi
 
 echo "=== STEP 4: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "U-Mamba Bot 3D 3-Phases (Fold 0, 200 epochs)" || echo "Metrics warning"
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "U-Mamba Bot 3D 3-Phases (Fold 0, Patch 192x192x64)" || echo "Metrics warning"
 
-echo "=== U-MAMBA BOT 3D (3 PHASES) PIPELINE COMPLETED SUCCESSFULLY AT $(date) ==="
+echo "=== U-MAMBA BOT 3D (3 PHASES, PATCH 192x192x64) PIPELINE COMPLETED SUCCESSFULLY AT $(date) ==="

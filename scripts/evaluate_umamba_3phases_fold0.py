@@ -98,9 +98,9 @@ def parse_args():
     parser.add_argument("--prep_dir", type=str, default=None, help="Path to preprocessed nnUNetPlans_3d_fullres dir")
     parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2", help="Path to raw NIfTI dir")
     parser.add_argument("--splits_file", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_3phases_200epochs/fold_0")
+    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_3phases_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 64])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()
 
