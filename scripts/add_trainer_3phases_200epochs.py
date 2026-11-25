@@ -104,7 +104,7 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
                                    num_output_channels: int,
                                    enable_deep_supervision: bool = True) -> torch.nn.Module:
         # Strictly enforce 3 input channels for the 3 natural phases ablation
-        return get_network_from_plans(
+        net = get_network_from_plans(
             configuration_manager.network_arch_class_name,
             configuration_manager.network_arch_init_kwargs,
             configuration_manager.network_arch_init_kwargs_req_import,
@@ -113,6 +113,13 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
             allow_init=True,
             deep_supervision=enable_deep_supervision
         )
+        orig_forward = net.forward
+        def forward_3phases(x):
+            if isinstance(x, torch.Tensor) and x.ndim >= 4 and x.shape[1] > 3:
+                x = x[:, :3].contiguous()
+            return orig_forward(x)
+        net.forward = forward_3phases
+        return net
 
     def train_step(self, batch: dict) -> dict:
         torch.backends.cudnn.enabled = False
@@ -127,13 +134,12 @@ class nnUNetTrainer_3phases_200epochs(nnUNetTrainer):
         return super().validation_step(batch)
 
     def on_train_end(self):
-        self.save_checkpoint(os.path.join(self.output_folder, "checkpoint_final.pth"))
+        super().on_train_end()
         best_ckpt = os.path.join(self.output_folder, "checkpoint_best.pth")
         if os.path.exists(best_ckpt):
             self.load_checkpoint(best_ckpt)
             self.print_to_log_file("Loaded checkpoint_best.pth for single-pass official validation.")
             print("Loaded checkpoint_best.pth for single-pass official validation.")
-        self.perform_actual_validation(save_probabilities=False)
 '''
 
 
