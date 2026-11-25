@@ -96,7 +96,7 @@ Dưới đây là bảng tổng hợp chuẩn mực khoa học áp dụng cho to
 | 3 | **Vanilla 3D U-Net** | Pure CNN (Baseline) | **[192, 192, 64]** | 2.359.296 | ~15.5 GB | Native CUDA | 75% X-Y, 80% Z |
 | 4 | **U-Mamba Bot 3D** | Hybrid CNN-Mamba | **[192, 192, 64]** | 2.359.296 | ~18.2 GB | Mamba Fused Scan ở Bottleneck | 75% X-Y, 80% Z |
 | 5 | **MedNeXt-L k3** | Inverted Bottleneck CNN | **[160, 160, 64]** | 1.638.400 | ~17.8 GB | Depthwise Conv k=3 | 62.5% X-Y, 80% Z |
-| 6 | **SwinUNETR v2 (5 pha)** | Vision Transformer | **[160, 160, 64]** | 1.638.400 | **~13.5 GB** | **Bắt buộc `use_checkpoint = True`** | 62.5% X-Y, 80% Z |
+| 6 | **SwinUNETR v2 (5 pha)** | Vision Transformer | **[192, 192, 64]** | 2.359.296 | **~19.8 GB** | **Bắt buộc `use_checkpoint = True`** | 75% X-Y, 80% Z (Đồng bộ 100% với CNN) |
 | 7 | **SwinUNETR v1 (5 pha)** | Vision Transformer | **[128, 128, 64]** | 1.048.576 | ~14.8 GB | Chuẩn KORAL-Net (2026 Table 6) | 50% X-Y, 80% Z |
 | 8 | **3D SegMamba** | Pure 3D Mamba SSM | **[128, 128, 64]** | 1.048.576 | ~11.5 GB | Selective Scan CUDA Kernel | 50% X-Y, 80% Z |
 
