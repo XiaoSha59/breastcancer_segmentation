@@ -46,7 +46,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train SwinUNETR V2 on I-SPY2 Fold 0")
     parser.add_argument("--prep_dir", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
-    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0")
+    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
@@ -241,7 +241,7 @@ def main():
     # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_200epochs", f"fold_{args.fold}")
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_opt_200epochs", f"fold_{args.fold}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "train.log")

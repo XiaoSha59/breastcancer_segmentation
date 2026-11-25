@@ -53,11 +53,11 @@ else
     PREPROCESSED_DIR="${nnUNet_preprocessed:-$HOME/nnUNet_preprocessed}/Dataset501_BreastDCE_ISPY2"
 fi
 
-# Locate results directory
+# Locate results directory (distinct folder to avoid overwriting baseline 96^3 results)
 if [ -n "$nnUNet_results" ] && [ "$nnUNet_results" != "$HOME/nnUNet_results" ]; then
-    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0"
+    RESULTS_DIR="$nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0"
 else
-    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0"
+    RESULTS_DIR="$PROJECT_DIR/results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0"
 fi
 mkdir -p "$RESULTS_DIR"
 
@@ -151,6 +151,6 @@ else
 fi
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
-python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "SwinUNETR V2 (Fold 0, 200 epochs)" || echo "Metrics warning"
+python3 -u "$SCRIPT_DIR/compute_paper_metrics.py" "$RESULTS_DIR" "SwinUNETR V2 (5p, Patch 160x160x64)" || echo "Metrics warning"
 
 echo "=== SWINUNETR V2 TRAINING & EVALUATION COMPLETED SUCCESSFULLY AT $(date) ==="

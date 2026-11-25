@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--data_dir", type=str, default="/home/XiaoSha/data/processed/Dataset501_BreastDCE_ISPY2")
     parser.add_argument("--prep_dir", type=str, default="", help="Path to preprocessed nnUNetPlans_3d_fullres folder")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
-    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_200epochs/fold_0")
+    parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/SwinUNETR_v2_opt_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--patch_size", type=int, nargs=3, default=[160, 160, 64], help="Optimal 3D patch size for RTX 4090 24GB on breast DCE-MRI")
     parser.add_argument("--feature_size", type=int, default=48)
@@ -49,7 +49,7 @@ def main():
     # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_200epochs", f"fold_{args.fold}")
+        args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", "SwinUNETR_v2_opt_200epochs", f"fold_{args.fold}")
 
     val_out_dir = os.path.join(args.output_dir, "validation")
     os.makedirs(val_out_dir, exist_ok=True)
