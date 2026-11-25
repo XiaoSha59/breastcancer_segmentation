@@ -3,24 +3,11 @@
 train_umamba_fold0.py
 =====================
 Fully Standardized U-Mamba Bot 3D Training on 5 DCE-MRI Phases (Fold 0, 200 Epochs).
-Optimal Spatial Patch Size Architecture: [192, 192, 64] (Native PyTorch, NO Checkpoint needed).
-
-Biological Protocol (Multi-parametric 5-Phase DCE-MRI):
-- Uses 5 Full Phases (3 Temporal Dynamics + 2 Differential Subtractions):
-  * Channel 0: Pre-contrast (T0 - Baseline anatomical morphology)
-  * Channel 1: Early Peak Wash-in (T_early - Peak tumor angiogenic enhancement)
-  * Channel 2: Delayed Wash-out (T_late - Venous clearance & kinetic curve slope)
-  * Channel 3: Subtraction 1 (SUB1 = T_early - T0 - Suppresses static parenchyma/adipose tissue)
-  * Channel 4: Subtraction 2 (SUB2 = T_late - T0 - Captures persistent vs washout kinetics)
-
-Engineering & Compliance Standards (AGENTS.md & 3D_UNET_BEST_PRACTICES.md):
-1. 100% Original U-Mamba Bot 3D architecture (Bo Wang Lab, MICCAI 2024 - Jun Ma et al.).
-2. Input channels strictly set to 5; output classes strictly 2 (Background, Tumor).
-3. Optimal spatial patch size: [192, 192, 64] matching ResEnc-L and nnU-Net SOTA.
-4. Native PyTorch execution (VRAM ~17.2 GB on RTX 4090 24GB, safe ~6.8 GB headroom).
-5. Exactly 250 iterations/epoch, Poly-decay LR schedule, 33% FG oversampling.
-6. CPU thread capping strictly at 4 threads (Intel i9-7900X server safety).
-7. Zero auto-shutdown; safe signal handling.
+100% faithful clone of train_umamba_3phases_fold0.py with ONLY:
+1. in_channels: Changed from 3 to 5.
+2. Slices strictly 5 DCE-MRI Phases [:5] (Pre, Early Peak, Delayed Late, SUB1, SUB2).
+3. Patch size: Upgraded from [128, 128, 64] to optimal [192, 192, 64].
+4. 100% preserves original architecture, deep supervision, poly LR, and batch sampler.
 """
 
 import os
@@ -35,11 +22,8 @@ import torch
 import torch.nn as nn
 from torch.cuda.amp import GradScaler, autocast
 
-# Server node1 hardware safety: Ada Lovelace native CUDA kernel enforcement
+# Server node1 hardware safety
 torch.backends.cudnn.enabled = False
-torch.backends.cudnn.benchmark = False
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
 torch.set_num_threads(4)
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -117,13 +101,23 @@ except ImportError:
                     patch = inputs[:, :, d:d+r_d, h:h+r_h, w:w+r_w]
                     patches.append(patch)
                     slices.append((d, h, w))
+                    if len(patches) == sw_batch_size:
+                        batch_patches = torch.cat(patches, dim=0)
+                        preds = predictor(batch_patches)
+                        if isinstance(preds, list):
+                            preds = preds[0]
+                        for i, (sd, sh, sw) in enumerate(slices):
+                            output_image[:, :, sd:sd+r_d, sh:sh+r_h, sw:sw+r_w] += preds[i:i+1]
+                            count_map[:, :, sd:sd+r_d, sh:sh+r_h, sw:sw+r_w] += 1.0
+                        patches = []
+                        slices = []
 
-        for batch_idx in range(0, len(patches), sw_batch_size):
-            batch_patches = torch.cat(patches[batch_idx:batch_idx+sw_batch_size], dim=0)
+        if len(patches) > 0:
+            batch_patches = torch.cat(patches, dim=0)
             preds = predictor(batch_patches)
             if isinstance(preds, list):
                 preds = preds[0]
-            for i, (sd, sh, sw) in enumerate(slices[batch_idx:batch_idx+sw_batch_size]):
+            for i, (sd, sh, sw) in enumerate(slices):
                 output_image[:, :, sd:sd+r_d, sh:sh+r_h, sw:sw+r_w] += preds[i:i+1]
                 count_map[:, :, sd:sd+r_d, sh:sh+r_h, sw:sw+r_w] += 1.0
 
@@ -131,7 +125,7 @@ except ImportError:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train U-Mamba Bot 3D on 5 DCE-MRI Phases (I-SPY2 Fold 0, Patch 192x192x64)")
+    parser = argparse.ArgumentParser(description="Train U-Mamba Bot 3D on 5 DCE-MRI Phases (I-SPY2 Fold 0)")
     parser.add_argument("--prep_dir", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/nnUNetPlans_3d_fullres")
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/UMamba_Bot_opt_200epochs/fold_0")
@@ -139,7 +133,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64], help="Optimal patch size [192, 192, 64]")
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--val_interval", type=int, default=5)
@@ -151,7 +145,7 @@ class FastNpyBatchSampler:
     """
     High-performance 3D batch sampler reading directly from 64GB preprocessed .b2nd or .npy files
     via OS memory mapping. Enforces exact 33% foreground tumor oversampling per batch.
-    Slices strictly all 5 DCE-MRI Phases [:5].
+    Slices strictly 5 DCE-MRI Phases [:5].
     """
     def __init__(self, prep_dir, case_ids, patch_size, oversample_foreground_percent=0.33):
         self.prep_dir = prep_dir
@@ -173,8 +167,6 @@ class FastNpyBatchSampler:
 
     def get_case_data(self, cid):
         if cid not in self.handles:
-            if len(self.handles) >= 100:
-                self.handles.pop(next(iter(self.handles)))
             if self.is_b2nd:
                 import blosc2
                 img_path = os.path.join(self.prep_dir, f"{cid}.b2nd")
@@ -193,7 +185,7 @@ class FastNpyBatchSampler:
 
         for b in range(batch_size):
             sampled = False
-            for attempt in range(20):
+            for attempt in range(15):
                 try:
                     cid = random.choice(self.case_ids)
                     data_or_handles = self.get_case_data(cid)
@@ -204,11 +196,10 @@ class FastNpyBatchSampler:
 
                         needs_pad = shape < self.patch_size
                         if np.any(needs_pad):
-                            n_c = min(5, img_h.shape[0])
-                            img_data = np.empty((n_c, *shape), dtype=np.float32)
-                            for c in range(n_c):
+                            img_data = np.empty((5, *shape), dtype=np.float32)
+                            for c in range(5):
                                 img_data[c] = img_h[c]
-                            seg_data = np.array(seg_h[:], dtype=np.float32)
+                            seg_data = np.array(seg_h[:])
                             pad_width_img = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
                             pad_width_seg = [(0, 0)] + [(0, max(0, p - s)) for s, p in zip(shape, self.patch_size)]
                             img_arr = np.pad(img_data, pad_width_img, mode="constant", constant_values=0)
@@ -231,7 +222,7 @@ class FastNpyBatchSampler:
 
                         s_0, s_1, s_2 = start
                         p_0, p_1, p_2 = self.patch_size
-                        # Slicing strictly all 5 DCE-MRI phases [:5]
+                        # Slicing strictly first 5 phases [:5]
                         patch_img = img_arr[:5, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
                         patch_seg = seg_arr[:, s_0:s_0+p_0, s_1:s_1+p_1, s_2:s_2+p_2]
 
@@ -262,7 +253,7 @@ class FastNpyBatchSampler:
                         s_d, s_h, s_w = start
                         p_d, p_h, p_w = self.patch_size
                         patch = data_arr[:, s_d:s_d+p_d, s_h:s_h+p_h, s_w:s_w+p_w]
-                        # Slicing strictly all 5 DCE-MRI phases [:5]
+                        # Slicing strictly first 5 phases [:5]
                         img = patch[:5].astype(np.float32)
                         lbl = (patch[5:6] > 0).astype(np.float32) if patch.shape[0] > 5 else (patch[0:1] > 0).astype(np.float32)
 
@@ -276,14 +267,14 @@ class FastNpyBatchSampler:
                     sampled = True
                     break
                 except Exception as ex:
+                    print(f"[DATA WARNING] Case {cid} failed during sampling ({ex}). Retrying...")
                     if cid in self.case_ids:
                         self.case_ids.remove(cid)
                     if cid in self.handles:
                         self.handles.pop(cid, None)
-                    continue
 
             if not sampled:
-                raise RuntimeError("Failed to sample valid 5-phase patch after 20 attempts.")
+                raise RuntimeError("Failed to sample valid 5-phase patch after 15 attempts.")
 
         return (
             torch.from_numpy(np.stack(batch_images)),
@@ -302,13 +293,13 @@ def compute_multiscale_loss(loss_fn, outputs, target):
         total_loss = 0.0
         for i, (out, w) in enumerate(zip(outputs, weights)):
             if out.shape[2:] != target.shape[2:]:
-                down_target = nn.functional.interpolate(target.float(), size=out.shape[2:], mode="nearest").long()
+                down_target = nn.functional.interpolate(target.float(), size=out.shape[2:], mode="nearest")
             else:
-                down_target = target.long()
+                down_target = target
             total_loss += w * loss_fn(out, down_target)
         return total_loss
     else:
-        return loss_fn(outputs, target.long())
+        return loss_fn(outputs, target)
 
 
 def main():
@@ -324,7 +315,6 @@ def main():
             f.write(formatted + "\n")
 
     log_print(f"=== Starting U-Mamba Bot 3D Training on I-SPY2 Fold {args.fold} (5 DCE-MRI Phases) ===")
-    log_print(f"Optimal Spatial Patch Size: {args.patch_size} (Receptive Field Context: ~45%).")
     log_print(f"Golden Standards: 250 iter/epoch, Poly-decay LR, 5 channels, 64GB preprocessed data reuse.")
     log_print(f"PyTorch Version: {torch.__version__}, CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
@@ -351,7 +341,7 @@ def main():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log_print(f"U-Mamba Bot 3D (5 phases) initialized. Trainable parameters: {total_params / 1e6:.2f}M")
 
-    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True) if HAS_MONAI else NativeDiceCELoss(to_onehot_y=True, softmax=True)
+    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.initial_lr, weight_decay=args.weight_decay)
     scaler = GradScaler()
 
@@ -387,7 +377,7 @@ def main():
 
         for it in range(args.iterations_per_epoch):
             inputs, labels = train_sampler.sample_batch(args.batch_size)
-            inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+            inputs, labels = inputs.to(device), labels.to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -396,8 +386,6 @@ def main():
                 loss = compute_multiscale_loss(loss_fn, outputs, labels)
 
             scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=12.0)
             scaler.step(optimizer)
             scaler.update()
 
@@ -450,7 +438,6 @@ def main():
                     union = pred.sum() + val_lbl.sum()
                     dice = (2.0 * inter / union) if union > 0 else (1.0 if pred.sum() == 0 and val_lbl.sum() == 0 else 0.0)
                     val_dices.append(dice)
-                    del val_img, val_out, pred
 
             mean_val_dice = float(np.mean(val_dices)) if val_dices else 0.0
             is_best = mean_val_dice > best_val_dice
@@ -464,7 +451,7 @@ def main():
                 "train_loss": epoch_loss,
                 "val_dice": mean_val_dice,
                 "lr": current_lr,
-                "epoch_time": epoch_duration,
+                "duration_s": epoch_duration,
             })
 
             # Checkpoint management
@@ -474,9 +461,8 @@ def main():
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scaler_state_dict": scaler.state_dict(),
                 "best_val_dice": best_val_dice,
-                "patch_size": args.patch_size,
                 "progress_history": progress_history,
-                "model_name": "UMamba_Bot_3D_5phases_opt",
+                "args": vars(args),
             }
 
             torch.save(checkpoint_data, checkpoint_latest)
@@ -484,8 +470,20 @@ def main():
                 log_print(f"Saving new best checkpoint to {checkpoint_best} (Val Dice: {best_val_dice:.4f})")
                 torch.save(checkpoint_data, checkpoint_best)
 
-    total_time = time.time() - start_time
-    log_print(f"=== U-Mamba Bot 3D (5-Phase, Patch {args.patch_size}) Training Completed in {total_time/3600:.2f} hours. Best Val Dice: {best_val_dice:.4f} ===")
+    total_training_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
+    log_print(f"=== U-MAMBA BOT 3D (5 PHASES) COMPLETE in {total_training_time}! Best Val Dice: {best_val_dice:.4f} ===")
+
+    summary_path = os.path.join(args.output_dir, "training_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "model": "U-Mamba Bot 3D (5 DCE-MRI Phases)",
+            "fold": args.fold,
+            "in_channels": 5,
+            "epochs": args.epochs,
+            "best_val_dice": best_val_dice,
+            "total_duration": total_training_time,
+            "progress": progress_history,
+        }, f, indent=2)
 
 
 if __name__ == "__main__":
