@@ -33,7 +33,7 @@
 | 10 | **SwinUNETR v2 (3 Phases)** | `MONAI SwinUNETR (Standardized)` | **HOÀN TẤT** | **0.7360** | -- | Server `node1` RTX 4090 (Ep 200) |
 | 11 | **MedNeXt-L k3 (3 Phases)** | `facebookresearch/MedNeXt` | **HOÀN TẤT** | **0.7341** | **0.7800** | `checkpoints/mednext_3phases/fold_0/checkpoint_best.pth`<br>`checkpoints/mednext_3phases/fold_0/paper_metrics_summary.txt` |
 | 12 | **Standard 3D nnU-Net (3 Phases)** | `nnU-Net v2 (Plain Conv)` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetPlans` |
-| 13 | **ResEnc-UNet L (3 Phases)** | `nnU-Net v2 / dynamic-net` | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Trainer `nnUNetTrainer_3phases_200epochs`, plans `nnUNetResEncUNetLPlans` |
+| 13 | **ResEnc-UNet L (3 Phases)** | `nnU-Net v2 / dynamic-net` | **HOÀN TẤT** | **0.7399** | **0.7822** | `checkpoints/resenc_3phases/checkpoint_best.pth`<br>`checkpoints/resenc_3phases/paper_metrics_summary.txt`<br>Median HD95: 7.82 mm, Median ASSD: 1.45 mm |
 | 14 | **PrimusV2-S (3 Phases)** | `MIC-DKFZ` (Wald et al. 2024) | **SẴN SÀNG (node1)** | -- | -- | **Ablation 3 pha**: Đã vá 100% |
 
 > *Ghi chú*: Toàn bộ các mô hình hoàn tất đều đã được lưu trữ an toàn cả file trọng số `.pth` lẫn file bảng điểm `paper_metrics_summary.txt`.
