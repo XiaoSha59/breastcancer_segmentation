@@ -14,6 +14,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Auto-sync latest helper scripts from GitHub
+RAW_URL="https://raw.githubusercontent.com/XiaoSha59/breastcancer_segmentation/main/scripts"
+for helper in "nnUNetTrainer_3phases_200epochs.py" "add_trainer_3phases_200epochs.py" "compute_paper_metrics.py"; do
+    curl -sSL "$RAW_URL/$helper" -o "$SCRIPT_DIR/$helper" 2>/dev/null || true
+done
+
 # Resource Allocation for node1 / lab server
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export OMP_NUM_THREADS=1
