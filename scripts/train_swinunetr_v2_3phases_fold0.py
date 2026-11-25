@@ -219,6 +219,10 @@ def get_poly_lr(initial_lr, current_epoch, max_epochs, exponent=0.9):
 def main():
     args = parse_args()
 
+    # Auto-align patch_size to match nnU-Net preprocessed array order (X, Y, Z: e.g. 256, 256, 80)
+    if args.patch_size[0] < args.patch_size[2]:
+        args.patch_size = [args.patch_size[1], args.patch_size[2], args.patch_size[0]]
+
     # Auto-resolve paths on node1 or GCP
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.prep_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):

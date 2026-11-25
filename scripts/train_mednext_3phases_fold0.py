@@ -219,6 +219,8 @@ class Fast3PhaseBatchSampler:
                     batch_labels.append(torch.from_numpy(lbl))
                     break
                 except Exception:
+                    if cid in self.case_ids:
+                        self.case_ids.remove(cid)
                     continue
 
         return torch.stack(batch_images), torch.stack(batch_labels)

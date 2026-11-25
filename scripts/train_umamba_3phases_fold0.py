@@ -453,6 +453,7 @@ def main():
                 "duration_s": epoch_duration,
             })
 
+            # Checkpoint management
             checkpoint_data = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -460,10 +461,12 @@ def main():
                 "scaler_state_dict": scaler.state_dict(),
                 "best_val_dice": best_val_dice,
                 "progress_history": progress_history,
+                "args": vars(args),
             }
-            torch.save(checkpoint_data, checkpoint_latest)
 
+            torch.save(checkpoint_data, checkpoint_latest)
             if is_best:
+                log_print(f"Saving new best checkpoint to {checkpoint_best} (Val Dice: {best_val_dice:.4f})")
                 torch.save(checkpoint_data, checkpoint_best)
 
     total_training_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
