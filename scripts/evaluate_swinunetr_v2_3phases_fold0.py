@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--patch_size", type=int, nargs=3, default=[192, 192, 64])
     parser.add_argument("--feature_size", type=int, default=48)
+    parser.add_argument("--use_checkpoint", action="store_true", default=True, help="Use activation checkpointing")
     parser.add_argument("--num_workers", type=int, default=4)
     return parser.parse_args()
 
@@ -114,7 +115,7 @@ def main():
         in_channels=3,
         out_channels=2,
         feature_size=args.feature_size,
-        use_checkpoint=False,
+        use_checkpoint=args.use_checkpoint,
         spatial_dims=3,
         downsample="mergingv2",
         use_v2=True,
@@ -188,14 +189,17 @@ def main():
                 # Ensure window dimensions are divisible by 32 for SwinUNETR v2 hierarchical stages
                 window_size = tuple(max(32, (dim // 32) * 32) for dim in window_size)
 
-                logits = sliding_window_inference(
-                    inputs=img_tensor,
-                    roi_size=window_size,
-                    sw_batch_size=2,
-                    predictor=model,
-                    overlap=0.5,
-                    mode="gaussian"
-                )
+                with torch.amp.autocast('cuda'):
+                    logits = sliding_window_inference(
+                        inputs=img_tensor,
+                        roi_size=window_size,
+                        sw_batch_size=1,
+                        predictor=model,
+                        overlap=0.5,
+                        mode="gaussian",
+                        sw_device="cuda",
+                        device="cpu",
+                    )
                 pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
 
                 # Compute core metrics
