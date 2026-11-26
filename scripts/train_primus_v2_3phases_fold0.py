@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--iterations_per_epoch", type=int, default=250)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 128, 128])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 192, 192], help="Optimal patch size [64, 192, 192] or [192, 192, 64]")
     parser.add_argument("--model_id", type=str, default="S", choices=["S", "B", "M"])
     parser.add_argument("--initial_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -249,6 +249,10 @@ class FastNpyBatchSampler:
 def main():
     args = parse_args()
 
+    # Auto-align patch_size to (Z, Y, X): e.g. [192, 192, 64] -> [64, 192, 192]
+    if args.patch_size[0] > args.patch_size[2]:
+        args.patch_size = [args.patch_size[2], args.patch_size[0], args.patch_size[1]]
+
     # Auto-resolve splits_file if default does not exist
     if not os.path.exists(args.splits_file):
         candidate_splits = [
@@ -421,10 +425,12 @@ def main():
                             val_out = sliding_window_inference(
                                 inputs=val_img_padded,
                                 roi_size=tuple(args.patch_size),
-                                sw_batch_size=2,
+                                sw_batch_size=1,
                                 predictor=model,
                                 overlap=0.5,
                                 mode="gaussian",
+                                sw_device="cuda",
+                                device="cpu",
                             )
 
                         pred = (torch.softmax(val_out, dim=1)[0, 1, :orig_d, :orig_h, :orig_w] > 0.5).cpu().numpy().astype(np.uint8)

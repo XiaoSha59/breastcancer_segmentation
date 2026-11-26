@@ -30,12 +30,19 @@ def parse_args():
     parser.add_argument("--splits_file", type=str, default="/home/XiaoSha/nnUNet_preprocessed/Dataset501_BreastDCE_ISPY2/splits_final.json")
     parser.add_argument("--output_dir", type=str, default="/home/XiaoSha/nnUNet_results/Dataset501_BreastDCE_ISPY2/PrimusV2_S_200epochs/fold_0")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 128, 128])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 192, 192], help="Optimal patch size [64, 192, 192] or [192, 192, 64]")
     parser.add_argument("--model_id", type=str, default="S", choices=["S", "B", "M"])
     return parser.parse_args()
 
 def main():
     args = parse_args()
+
+    # Auto-align patch_size to (Z, Y, X): e.g. [192, 192, 64] -> [64, 192, 192]
+    if args.patch_size[0] > args.patch_size[2]:
+        args.patch_size = [args.patch_size[2], args.patch_size[0], args.patch_size[1]]
+
+    # Cluster Safety: Strictly limit CPU threads for shared server (node1)
+    torch.set_num_threads(4)
 
     # Auto-resolve output_dir if default is /home/XiaoSha/... on another machine
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
@@ -154,10 +161,12 @@ def main():
                 outputs = sliding_window_inference(
                     inputs=inputs,
                     roi_size=tuple(args.patch_size),
-                    sw_batch_size=2,
+                    sw_batch_size=1,
                     predictor=model,
                     overlap=0.5,
                     mode="gaussian",
+                    sw_device="cuda",
+                    device="cpu",
                 )
 
             prob = torch.softmax(outputs, dim=1)[:, 1:2]

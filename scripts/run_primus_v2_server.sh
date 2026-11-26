@@ -116,7 +116,7 @@ python3 -u "$SCRIPT_DIR/train_primus_v2_fold0.py" \
     --epochs 200 \
     --iterations_per_epoch 250 \
     --batch_size 2 \
-    --patch_size 64 128 128 \
+    --patch_size 64 192 192 \
     --model_id S \
     --initial_lr 0.0001 \
     $EXTRA_FLAGS &
@@ -140,7 +140,7 @@ python3 -u "$SCRIPT_DIR/evaluate_primus_v2_fold0.py" \
     --splits_file "$SPLITS_FILE" \
     --output_dir "$RESULTS_DIR" \
     --fold 0 \
-    --patch_size 64 128 128 \
+    --patch_size 64 192 192 \
     --model_id S || echo "Evaluation warning: Check validation logs"
 
 echo "=== STEP 5: COMPUTE OFFICIAL PAPER METRICS ==="
