@@ -304,6 +304,11 @@ def compute_multiscale_loss(loss_fn, outputs, target):
 
 def main():
     args = parse_args()
+
+    # Auto-align patch_size to (Z, Y, X): e.g. [192, 192, 64] -> [64, 192, 192]
+    if args.patch_size[0] > args.patch_size[2]:
+        args.patch_size = [args.patch_size[2], args.patch_size[0], args.patch_size[1]]
+
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = os.path.join(args.output_dir, "training_log.txt")
 
@@ -425,9 +430,11 @@ def main():
                         val_out = sliding_window_inference(
                             inputs=val_img,
                             roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
+                            sw_batch_size=1,
                             predictor=model,
                             overlap=0.5,
+                            sw_device="cuda",
+                            device="cpu",
                         )
 
                     if isinstance(val_out, list):
