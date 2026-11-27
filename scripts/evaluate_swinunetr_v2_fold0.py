@@ -311,9 +311,8 @@ def main():
         subprocess.run([
             sys.executable,
             compute_metrics_script,
-            "--pred_dir", val_out_dir,
-            "--gt_dir", labels_dir if has_raw else prep_dir,
-            "--output_file", os.path.join(args.output_dir, "paper_metrics_summary.txt")
+            args.output_dir,
+            "SwinUNETR V2 (5p, Patch 192x192x64)"
         ])
 
 if __name__ == "__main__":
