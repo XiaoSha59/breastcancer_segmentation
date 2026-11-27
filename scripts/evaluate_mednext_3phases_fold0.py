@@ -54,6 +54,13 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Auto-align patch_size to (Z, Y, X): e.g. [192, 192, 64] -> [64, 192, 192]
+    if args.patch_size[0] > args.patch_size[2]:
+        args.patch_size = [args.patch_size[2], args.patch_size[0], args.patch_size[1]]
+
+    # Cluster Safety: Strictly limit CPU threads for shared server (node1)
+    torch.set_num_threads(4)
+
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if args.output_dir.startswith("/home/XiaoSha") and not os.path.exists("/home/XiaoSha"):
         args.output_dir = os.path.join(project_root, "results", "Dataset501_BreastDCE_ISPY2", f"MedNeXt_{args.model_id}_k{args.kernel_size}_3phases_200epochs", f"fold_{args.fold}")
@@ -196,9 +203,11 @@ def main():
                         outputs = sliding_window_inference(
                             inputs=inputs,
                             roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
+                            sw_batch_size=1,
                             predictor=model,
                             overlap=0.5,
+                            sw_device="cuda",
+                            device="cpu",
                         )
                 except RuntimeError as re:
                     if "cuDNN" in str(re) or "CUDNN" in str(re):
@@ -206,9 +215,11 @@ def main():
                         outputs = sliding_window_inference(
                             inputs=inputs,
                             roi_size=tuple(args.patch_size),
-                            sw_batch_size=2,
+                            sw_batch_size=1,
                             predictor=model,
                             overlap=0.5,
+                            sw_device="cuda",
+                            device="cpu",
                         )
                     else:
                         raise re
